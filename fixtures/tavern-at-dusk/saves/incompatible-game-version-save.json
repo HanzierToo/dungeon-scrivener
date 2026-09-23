@@ -35,6 +35,7 @@
     },
     "conversationStack": [],
     "gameTimeMilliseconds": 120000,
+    "randomInitialSeed": null,
     "randomSeed": null,
     "randomOutcomes": [
       {

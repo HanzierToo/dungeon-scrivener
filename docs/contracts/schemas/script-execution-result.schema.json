@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:script-execution-result",
+  "title": "DungeonScrivener script executor result v1",
+  "type": "object",
+  "$defs": {
+    "traceRecord": {
+      "type": "object",
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 0 },
+        "scriptId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "kind": { "enum": ["activation-start", "capability-call", "activation-end", "failure"] },
+        "sourceSpan": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/sourceSpan" },
+        "capability": { "enum": ["api.read", "api.hasTag", "api.request", "api.emit", "api.randomInt", "api.randomFloat", "len"] },
+        "instructionsExecuted": { "type": "integer", "minimum": 0 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 512 }
+      },
+      "required": ["sequence", "scriptId", "kind", "reason"],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "ok": { "type": "boolean" },
+    "instructionsExecuted": { "type": "integer", "minimum": 0, "maximum": 50000 },
+    "diagnostic": { "$ref": "urn:dungeon-scrivener:schema:v1:diagnostics#/properties/diagnostics/items" },
+    "trace": {
+      "type": "array",
+      "maxItems": 20000,
+      "items": { "$ref": "#/$defs/traceRecord" }
+    }
+  },
+  "required": ["ok", "instructionsExecuted", "trace"],
+  "allOf": [
+    {
+      "if": { "properties": { "ok": { "const": true } } },
+      "then": { "properties": { "diagnostic": false } },
+      "else": { "required": ["diagnostic"] }
+    }
+  ],
+  "additionalProperties": false
+}

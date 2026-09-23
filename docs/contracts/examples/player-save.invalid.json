@@ -27,6 +27,7 @@
     "conversationStack": [],
     "gameTimeMilliseconds": 0,
     "randomnessMode": "unseeded",
+    "randomInitialSeed": null,
     "randomSeed": null,
     "randomOutcomes": [],
     "ruleGuards": {},

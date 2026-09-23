@@ -95,12 +95,18 @@ Different command IDs may overlap. That is a runtime ambiguity, not a model vali
 │ Target [letters ▾]  WAV asset [birds.wav ▾]  Volume [────●──] 0.25     │
 │ [+ Add mapping]                                                         │
 │ Fallback [Silent ▾]                                                     │
+│                                                                         │
+│ Player saves                                                           │
+│ [Enabled ☑] Slots [ 2 ] (1–10)  Location [Anywhere ▾]                   │
+│ Checkpoint nodes [select…] (required for Checkpoint)                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 When time mode is **Per accepted action**, expose milliseconds per accepted action; the inactive-time policy is pause and the catch-up limit is zero. When time mode is **Elapsed**, expose **When the game page is hidden or the window is unfocused: Pause / Bounded catch-up**. If bounded catch-up is selected, require a positive maximum interval in milliseconds. **Show game clock to the player** controls the optional HUD. The same policy covers hidden and unfocused states.
 
 A typing-sound mapping assigns a local WAV asset and a volume from 0 to 1 to either one standardized, case-sensitive keyboard code or a key group: letters, digits, space, punctuation, editing, or other. The form can add an exact key such as `Enter` or `KeyA`; an exact-key mapping takes precedence over a group mapping. Offer fallback **Silent** or **WAV asset + volume**. Volume 0 mutes that mapping; 1 applies no extra attenuation. Prevent duplicate targets and show missing/non-WAV assets as validation errors. Do not add an uncontracted master volume slider to the player.
+
+**Player saves** exposes the `savePolicy`: disable saves, or enable 1–10 in-app slots and allow saves anywhere or at selected checkpoint nodes. Checkpoint mode requires at least one declared checkpoint. Explain that slot count controls in-app slots only; downloaded save ZIPs can still be copied.
 
 ### Script references in Apprentice
 
@@ -139,7 +145,7 @@ The script runs at that effect's position. A script cannot directly invoke anoth
 
 ```text
 ┌ Lantern Story · Playtest ───────────────────────────────────────────────┐
-│ [Return to editing] [Restart from entry]             [Load save ZIP]   │
+│ [Return to editing] [Restart…]                       [Load save ZIP]   │
 ├───────────────────────────────────────────┬─────────────────────────────┤
 │ Player                                    │ Debug                       │
 │ Game clock: 02:00 (only when enabled)     │ Current scene: Market       │
@@ -154,6 +160,27 @@ The script runs at that effect's position. A script cannot directly invoke anoth
 └───────────────────────────────────────────┴─────────────────────────────┘
 ```
 
+### Start and restart a seeded run
+
+Starting a regular player session uses the host's configured seed source when the world is seeded and no seed override is supplied. The engine requests one uint32 seed. There is no promise that this value is unique or differs from a previous run. If the host source is missing or returns an invalid value, session creation fails; the engine does not silently fall back to a clock value, a constant, or unseeded randomness.
+
+The creator/playtester may expose an optional seed override in the **Start playtest** and **Restart** form. Leave it blank for the default host-source behavior. If entered, accept only an integer from 0 through 4,294,967,295; the supplied value bypasses the host source. In seeded mode, zero is normalized by the engine to `0x6d2b79f5`. Do not show the seed field for unseeded mode; the engine rejects a seed supplied to an unseeded session.
+
+```text
+┌ Start / restart playtest ───────────────────────────────────────────────┐
+│ Randomness: Seeded (from world settings)                                │
+│ Seed override (optional) [                         ]                    │
+│ Leave blank to use the configured host seed source.                    │
+│ Enter a uint32 value: 0–4,294,967,295.                                  │
+│                                                                         │
+│                         [Cancel] [Start new run]                        │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+In the creator's run/debug information, show the effective normalized **initial seed** (`randomInitialSeed`) and a **Copy seed** action. To reproduce a seeded run, start from the entry with that seed and repeat the same accepted action sequence against the same playable-content fingerprint and engine version. Restart without an override requests a value from the host source; the contract does not require that it differ from the prior seed. Loading a compatible save is different: it resumes the saved session, including its current PRNG state (`randomSeed`), so future draws continue from the saved point; it does not request a new start seed. Do not present the current PRNG state as the seed to reuse for a fresh run.
+
+An unseeded save contains the ordered random outcomes and supports call-verified replay through the replay harness. The contracts do not define a player or creator UI for selecting a saved outcome log, supplying the matching action transcript, or displaying replay mismatch state. Do not label ordinary **Restart** as an unseeded replay feature.
+
 Choices and typed commands may both be available. The command field submits the user's raw text as `command-text`; the player UI does not construct typed parameter maps. Show authored patterns as help, not as a promise of natural-language parsing. Keep submitted text available when no command matches or when it is ambiguous.
 
 - **One match:** dispatch the matched command and converted captures as one action.
@@ -161,11 +188,13 @@ Choices and typed commands may both be available. The command field submits the 
 - **Ambiguous:** say that the input matched multiple commands and that no action ran. List the matching IDs in the contract's sorted order with their canonical patterns; return focus to the command field. Do not choose a match or resolve ambiguity by priority.
 - **Disabled match:** show the returned disabled reason and leave the snapshot unchanged.
 
-The `Tavern at Dusk` fixture demonstrates these outcomes. `COUNT   CANDLES 3` matches `count-candles`; `count candles two` is no-match; `count candles 2` is ambiguous between `count-candles` and `count-candles-two` in that order. No-match and ambiguous input do not consume action time.
+The `Tavern at Dusk` fixture demonstrates these outcomes. `COUNT   CANDLES 3` matches `count-candles`; `count candles two` is no-match; `count candles 2` is ambiguous between `count-candles` and `count-candles-two` in that order. No-match and ambiguous input do not consume action time. If raw input is malformed UTF-16, exceeds 4,096 UTF-8 bytes or 1,024 Unicode scalar values, or normalizes to more than 128 tokens, show the returned invalid-input diagnostic beside the command field. Preserve the text for correction; never truncate it or match a prefix. Invalid input does not mutate state or time.
 
 If the author enabled the clock HUD, show the projected clock. Elapsed-time behavior pauses or catches up by the configured maximum while the player page is hidden or unfocused. On return/resume, show the resulting time; do not advance the HUD independently of the engine. The debug trace can show the recorded randomness provider and outcome. The player cannot change the author's seeded/unseeded mode.
 
 Typing-sound mappings and their per-target volumes are authored settings. The player uses the authored mapping and fallback. The 1B data model has no player-wide volume override; see contract gaps below.
+
+Show start/restart seed validation or host-source failure in the playtest start dialog. For player saves, show save-encoding/size failures beside the explicit save action and keep the current session; never show a success state if the canonical session JSON exceeds 8 MiB or the save cannot fit the 8 MiB save ZIP/member limits. On load, reject ZIP input over 8 MiB or expanded `save.json` over 8 MiB before replacing the active session. A successful load resumes the saved session; a compatibility mismatch remains the separate blocking dialog described below. If a runtime transition would exceed the session-size limit, or an unseeded action would exceed the random-outcome history limit, show the returned action diagnostic in Playtest Diagnostics and retain the pre-action snapshot, clock, and randomness state.
 
 ## Screen 5: Load a player save and show incompatibility
 
@@ -199,11 +228,11 @@ List whichever compatibility checks differ: project ID, `gameVersion`, engine ve
 ## Flow B: Developer, Sage-first with a visual review
 
 1. Create a project with an explicit initial game version or import a project ZIP. Open Sage Mode.
-2. Edit `world.json` to select `settings.randomness.mode`; use `seeded` or `unseeded`. The seed required to start a seeded session is an unresolved host/player input policy, so this flow does not invent a seed-entry control.
+2. Edit `world.json` to select `settings.randomness.mode`; use `seeded` or `unseeded`. For a seeded playtest, leave the optional override blank to use the host's seed source, or enter a uint32 to reproduce a run. Record the normalized initial seed displayed in run information. Unseeded mode does not accept a seed override.
 3. Edit the appropriate choice, command, dialogue, lifecycle, or rule effects to include a `run-script` effect naming a declared script. Open its `scripts/` file to edit the `main` source.
 4. Switch to Apprentice Mode to review the graph and forms. A script reference remains noneditable there; **Edit in Sage** returns to its Sage file. A supported Effects form may select the declared script as an effect without exposing script statements.
 5. In Apprentice project settings, configure time and optional clock HUD, then assign typing sounds and per-target volumes. Fix any diagnostics that link to a field or file.
-6. Playtest choices and raw typed commands. Inspect trace reasons and any random provider/outcome. Test the fixture's no-match and ambiguous command examples without expecting state or clock changes.
+6. Playtest choices and raw typed commands. Inspect trace reasons, randomness provider/outcome, and the effective initial seed. Reproduce seeded runs with the same initial seed and accepted action sequence. Test the fixture's no-match, ambiguous, and over-limit input results without expecting state or clock changes.
 7. Use **Load save ZIP** to test a player save. A mismatch dialog lists the differing compatibility fields before any session replacement.
 8. Download the project ZIP for authoring recovery. Export the game ZIP after resolving blocking diagnostics and acknowledging required warnings.
 
@@ -215,13 +244,17 @@ List whichever compatibility checks differ: project ID, `gameVersion`, engine ve
 | New project | Label title, locale, and required SemVer game-version fields. | Invalid game version: show the manifest validation message next to the field and in Diagnostics; retain the entered value. |
 | Apprentice graph | No scenes: offer **Add first scene**. No selection: prompt to select/add. No outgoing navigation: offer **Add connection**. | Invalid field/reference: show inline feedback plus linked diagnostic; preserve entered data. |
 | Command form | No commands: offer **Add command** and explain canonical pattern/alias fields. | Duplicate or malformed patterns within one command: validation diagnostic. A collision across command IDs is shown only when player input produces an ambiguous match. |
+| Player command input | Keep the raw typed text visible while submitting. | Invalid UTF-16, over 4,096 UTF-8 bytes, over 1,024 Unicode scalar values, or over 128 normalized tokens: show invalid-input diagnostic at the field; do not truncate, match a prefix, mutate state, or advance time. |
 | Sage editor | No file selected: prompt to select a file. Empty text file: show an editable buffer. | Invalid JSON/script: show file and source location in Diagnostics, preserve invalid bytes, and keep the last valid parsed project available where applicable. |
 | Time settings | Show controls for selected time mode only; inactive-time choices are not relevant to per-action time. | Incompatible fields or catch-up bounds: show the validation error next to the setting and in Diagnostics. |
 | Typing sounds | No mappings: explain that no key mapping is assigned. | Duplicate target, unresolved asset, or non-WAV asset: show a linked validation error. Fallback is explicit: silent or a WAV mapping with volume. |
 | Player command input | Show available authored patterns if any. | No-match, ambiguous, or disabled resolution appears adjacent to the input. Preserve input; no-match/ambiguous/disabled do not mutate the snapshot. |
 | Diagnostics | No findings: “No diagnostics.” Keep validation status non-modal during editing. | Link to field, file, entity, or source span when present. Distinguish action blockers from acknowledgment requirements. |
 | Playtest | No trace yet: “No actions yet.” Clock HUD appears only when enabled. | A blocking play diagnostic prevents start and links to its source. Runtime/script failure shows its diagnostic and leaves the pre-action snapshot intact. |
-| Player save load | Ask for a save ZIP. | Decode error and compatibility mismatch have separate messages. Mismatch lists project ID, game version, engine version, and/or fingerprint; current session remains unchanged. |
+| Playtest start / restart | For seeded mode, blank optional override uses the host seed source. A supplied uint32 bypasses it; show effective normalized initial seed in creator run info. Unseeded mode has no seed field. | Invalid supplied seed or unavailable/invalid host seed: show a start error and do not start a partial session. The API does not define a typed create-session failure payload, so exact diagnostic presentation is unresolved. |
+| Player save creation | Show enabled slot count and whether saves are allowed anywhere or at checkpoints. | More than 10 enabled slots or invalid checkpoint selection is an author validation error linked to Save settings. If session JSON exceeds 8 MiB or encoding cannot fit the 8 MiB expanded member/ZIP cap, show save failure beside the save action; keep the session and do not claim it was saved. |
+| Player save load | Ask for a save ZIP. | Reject ZIP input over 8 MiB or expanded `save.json` over 8 MiB before replacing the active session. Decode error and compatibility mismatch have separate messages. Mismatch lists project ID, game version, engine version, and/or fingerprint; current session remains unchanged. |
+| Session limits | No special state until a relevant operation reaches a limit. | The 16,384th unseeded outcome may commit; a later draw fails its action atomically without truncating history. A transition that would exceed 8 MiB canonical session JSON fails and keeps the previous session. Show the returned action diagnostic in Playtest Diagnostics. |
 | Recovery / project ZIP | Show current recovery status and deliberate ZIP download state. | Storage or download failure: do not claim a successful backup; keep the project open, retain dirty state, and offer retry. Invalid authored data remains project-ZIP recoverable. |
 | Game export | Show progress, validation summary, and required warning acknowledgment. | A blocking export diagnostic shows its precise source and keeps project ZIP download available. Never silently skip broken content. |
 
@@ -233,13 +266,16 @@ A dismissible unsaved-work reminder appears after 10–15 minutes of unsaved wor
 | --- | --- | --- |
 | Project title, locale, game version | Create / author | Create a manifest with the required author-controlled `gameVersion`; show SemVer validation. |
 | Command pattern, aliases, parameters | Apprentice / author | Define canonical pattern, aliases, one-token typed captures, condition, and effects. Overlap across IDs is not given precedence. |
+| Save policy | Apprentice / author | Disable saves or set 1–10 in-app slots; allow anywhere or require one or more checkpoint nodes. Out-of-range slot counts and invalid checkpoint references are linked validation errors. |
 | `run-script` effect | Sage / author; bounded effect form in Apprentice | Invoke a declared script's zero-argument `main` from a supported effect list. Source stays editable only in Sage. |
 | Randomness mode | Sage / author | Select `seeded` or `unseeded` in `world.json`; do not expose a host entropy-source selector. |
+| Seed override and run seed | Creator / playtester | Optional seeded start/restart uint32 override; blank uses the configured host seed source. Show normalized initial seed for reproduction. Loading a save resumes current PRNG state. |
 | Time mode and inactive policy | Apprentice / author | Select per-action or elapsed; for elapsed, pause or cap catch-up while hidden/unfocused; set optional HUD. |
 | Typing-sound target, asset, volume | Apprentice / author | Assign exact key or key group to WAV and 0–1 volume; choose explicit silent or WAV fallback. |
 | Raw command field | Player / playtester | Submit raw text; show unique match, no-match, ambiguity, or disabled reason. Ambiguous candidates are not auto-selected. |
 | Diagnostics panel | Author / playtester | Show precise path/entity/source location, blocking action, and acknowledgment requirements separately. |
 | Load save ZIP | Player / playtester | Decode then compare project ID, game version, engine version, and fingerprint before replacing session. Reject mismatch. |
+| Save ZIP limits | Player / playtester | Enforce 8 MiB ZIP input, 8 MiB expanded save member, and 8 MiB canonical session JSON. On failure, preserve the current session and show an error at the save/load action. |
 | Clock HUD | Player | Show engine-projected time only when the author enabled it. |
 
 ## Keyboard and focus behavior
@@ -253,6 +289,8 @@ A dismissible unsaved-work reminder appears after 10–15 minutes of unsaved wor
 
 ## Contract gaps to resolve before promising these controls
 
-1. **Seeded-session seed source.** The contract selects `seeded` or `unseeded`, and `SessionStartOptions` requires a uint32 seed for seeded sessions. It does not specify who chooses or supplies that seed, or whether the author, player, or host controls it. The wireframe exposes provider mode but leaves the seeded start control unresolved.
-2. **Player-wide typing-sound volume.** The contract supports author-configured per-target and fallback volumes, but no player-wide volume override or mute setting. The wireframe exposes assigned volumes in author settings and does not promise a player master slider.
-3. **Script summary text.** A declared script has ID, language, path, and `main` entrypoint; the contract has no author-authored summary field. The Apprentice script card therefore shows only those declared details and an **Edit in Sage** link.
+1. **Seed start error payload.** The contract defines seed validation, host-source fallback, and failure when no valid uint32 is available. However, `createSession` returns `SessionSnapshot` directly and exposes no typed error/diagnostic result. The UX can provide a start-error location, but the exact message and diagnostic payload/channel are not specified.
+2. **Save size error payload.** The budgets require save encoding and import to fail with a diagnostic, but the public save API returns `Promise<Uint8Array>` / `Promise<PlayerSaveArchive>` without a typed failure result or stable error code. The UX can identify the save/load action and preserve the active session, but cannot promise a particular structured size-error presentation from the API.
+3. **Unseeded replay controls.** Saved unseeded outcomes and a call-verified replay source/harness are defined. The current player/debugger interface contract does not define how a creator selects the outcome log and matching action transcript or how replay mismatch is presented.
+4. **Player-wide typing-sound volume.** The contract supports author-configured per-target and fallback volumes, but no player-wide volume override or mute setting. The wireframe exposes assigned volumes in author settings and does not promise a player master slider.
+5. **Script summary text.** A declared script has ID, language, path, and `main` entrypoint; the contract has no author-authored summary field. The Apprentice script card therefore shows only those declared details and an **Edit in Sage** link.

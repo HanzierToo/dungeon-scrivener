@@ -339,6 +339,12 @@ export interface ScriptIR {
   readonly functions: readonly ScriptFunction[];
 }
 
+export interface CompiledScriptBundle {
+  readonly format: 'dungeon-scrivener-compiled-script-bundle';
+  readonly schemaVersion: SchemaVersion;
+  readonly scripts: readonly ScriptIR[];
+}
+
 export interface ScriptFunction {
   readonly name: string;
   readonly parameters: readonly string[];
@@ -453,6 +459,27 @@ export interface PlayerClockView {
   readonly display: string;
 }
 
+export interface PlayerAssetReference {
+  readonly assetId: ContentDigest;
+  readonly mediaType: 'audio/wav';
+  readonly byteLength: number;
+}
+
+export interface PlayerTypingSoundMapping {
+  readonly target: TypingSoundTarget;
+  readonly asset: PlayerAssetReference;
+  readonly volume: number;
+}
+
+export type PlayerTypingSoundFallback =
+  | { readonly kind: 'silent' }
+  | { readonly kind: 'asset'; readonly asset: PlayerAssetReference; readonly volume: number };
+
+export interface PlayerTypingSoundView {
+  readonly mappings: readonly PlayerTypingSoundMapping[];
+  readonly fallback: PlayerTypingSoundFallback;
+}
+
 export interface PlayerView {
   readonly format: 'dungeon-scrivener-player-view';
   readonly schemaVersion: SchemaVersion;
@@ -465,6 +492,8 @@ export interface PlayerView {
   readonly dialogue?: PlayerDialogueView;
   readonly inventory?: readonly PlayerInventoryItemView[];
   readonly clock?: PlayerClockView;
+  /** Resolved local references; read their bytes through MediaAssetApi. */
+  readonly typingSounds: PlayerTypingSoundView;
   readonly diagnostics: readonly Pick<Diagnostic, 'code' | 'severity' | 'message'>[];
 }
 
@@ -513,7 +542,7 @@ export interface ContentFingerprint {
 
 export interface RandomOutcome {
   readonly ordinal: number;
-  readonly sourceScriptId?: ScriptId;
+  readonly sourceScriptId: ScriptId;
   readonly provider: 'seeded' | 'unseeded';
   readonly operation: 'float' | 'integer';
   readonly minimum?: number;
@@ -523,6 +552,18 @@ export interface RandomOutcome {
 
 /** Only nondeterministic draws are persisted; seeded draws replay from randomSeed. */
 export type UnseededRandomOutcome = Omit<RandomOutcome, 'provider'> & { readonly provider: 'unseeded' };
+
+export interface RandomSeedSource {
+  /** Supplies one uniformly distributed uint32 seed. */
+  nextUint32(): number;
+}
+
+export type RandomOutcomeRequest = Pick<RandomOutcome, 'ordinal' | 'sourceScriptId' | 'operation' | 'minimum' | 'maximum'>;
+
+export interface RandomOutcomeReplaySource {
+  /** Returns the recorded value for this exact request, or undefined on exhaustion/mismatch. */
+  nextOutcome(request: RandomOutcomeRequest): UnseededRandomOutcome | undefined;
+}
 
 export type PageVisibility = 'visible' | 'hidden';
 
@@ -553,6 +594,9 @@ export interface SavedSessionState {
   readonly conversationStack: readonly SavedConversationContext[];
   readonly gameTimeMilliseconds: number;
   readonly randomnessMode: RandomnessMode;
+  /** Normalized seed used to initialize the session; null in unseeded mode. */
+  readonly randomInitialSeed: number | null;
+  /** Current xorshift32 state needed to continue seeded randomness; null when unseeded. */
   readonly randomSeed: number | null;
   readonly randomOutcomes: readonly UnseededRandomOutcome[];
   /** Mutable tags, including authored initial tags plus accepted tag effects. */
@@ -599,17 +643,19 @@ export type CommandMatchResult =
       readonly normalizedText: string;
     }
   | { readonly kind: 'no-match'; readonly normalizedText: string }
-  | { readonly kind: 'ambiguous'; readonly commandIds: readonly CommandId[]; readonly normalizedText: string };
+  | { readonly kind: 'ambiguous'; readonly commandIds: readonly CommandId[]; readonly normalizedText: string }
+  | { readonly kind: 'invalid-input'; readonly diagnostic: Diagnostic };
 
 export type PlayerInputResolution =
   | { readonly kind: 'choice'; readonly actionId: ChoiceId }
   | { readonly kind: 'command'; readonly action: Extract<ActionInput, { readonly kind: 'command' }>; readonly normalizedText: string }
   | { readonly kind: 'no-match'; readonly normalizedText: string }
   | { readonly kind: 'ambiguous'; readonly commandIds: readonly CommandId[]; readonly normalizedText: string }
+  | { readonly kind: 'invalid-input'; readonly diagnostic: Diagnostic }
   | { readonly kind: 'disabled'; readonly actionId: StableId; readonly reason: string };
 
 export interface SessionStartOptions {
-  /** Required iff world.settings.randomness.mode is seeded. Must be uint32. */
+  /** Optional seeded-mode override. If absent the host's seededSeedSource is used. */
   readonly randomSeed?: number;
   readonly wallClockEpochMilliseconds: number;
   readonly visibility: PageVisibility;
@@ -628,9 +674,90 @@ export interface RandomEntropySource {
   nextUint32(): number;
 }
 
+export type ScriptInvocationOrigin =
+  | { readonly kind: 'action'; readonly actionId: StableId }
+  | { readonly kind: 'rule'; readonly ruleId: RuleId }
+  | { readonly kind: 'lifecycle'; readonly nodeId: NodeId; readonly phase: 'entry' | 'revisit' | 'exit' };
+
+export interface ScriptExecutionCapabilities {
+  read(reference: StateReference): Scalar;
+  hasTag(entityId: EntityId, tag: string): boolean;
+  request(effect: ScriptEffect): void;
+  emit(eventId: EventId, payload: JsonRecord): void;
+  randomInt(minimum: number, maximum: number): number;
+  randomFloat(): number;
+}
+
+/** Thrown by an engine capability callback when an operation is rejected or a budget is exhausted. */
+export interface ScriptCapabilityError extends Error {
+  readonly diagnostic: Diagnostic;
+}
+
+export interface ScriptExecutionLimits {
+  /** Already clamped to both the activation budget and remaining action budget. */
+  readonly maxInstructions: number;
+  readonly maxCallDepth: number;
+  readonly maxLoopIterations: number;
+  readonly maxAllocatedBytes: number;
+  readonly maxStringBytes: number;
+  readonly maxCollectionMembers: number;
+  readonly maxValueDepth: number;
+  /** Remaining action-wide budgets, enforced again by the engine. */
+  readonly maxCapabilityCalls: number;
+  readonly maxRequestedEffects: number;
+  readonly maxTraceRecords: number;
+}
+
+export interface ScriptExecutionContext {
+  readonly origin: ScriptInvocationOrigin;
+  readonly limits: ScriptExecutionLimits;
+  readonly capabilities: ScriptExecutionCapabilities;
+}
+
+export interface ScriptExecutionTraceRecord {
+  readonly sequence: number;
+  readonly scriptId: ScriptId;
+  readonly kind: 'activation-start' | 'capability-call' | 'activation-end' | 'failure';
+  readonly sourceSpan?: SourceSpan;
+  readonly capability?: ScriptCapabilityName;
+  readonly instructionsExecuted?: number;
+  readonly reason: string;
+}
+
+export type ScriptExecutionResult =
+  | { readonly ok: true; readonly instructionsExecuted: number; readonly trace: readonly ScriptExecutionTraceRecord[] }
+  | { readonly ok: false; readonly instructionsExecuted: number; readonly diagnostic: Diagnostic; readonly trace: readonly ScriptExecutionTraceRecord[] };
+
+export interface ScriptExecutorApi {
+  /** Synchronous single activation. Capabilities bridge into the engine's provisional transaction. */
+  executeScript(script: ScriptIR, context: ScriptExecutionContext): ScriptExecutionResult;
+}
+
+export interface ResolvedMediaAsset {
+  readonly assetId: ContentDigest;
+  readonly mediaType: string;
+  readonly byteLength: number;
+  readonly bytes: Uint8Array;
+}
+
+export type MediaAssetResolution =
+  | { readonly ok: true; readonly asset: ResolvedMediaAsset }
+  | { readonly ok: false; readonly diagnostic: Diagnostic };
+
+export interface MediaAssetApi {
+  /** Resolves by content hash, verifies bytes and returns them without exposing project paths. */
+  resolveAsset(assetId: ContentDigest): MediaAssetResolution;
+}
+
 export interface GameEngineHost {
-  /** Required host source; seeded worlds do not consume it. */
-  readonly unseededRandomSource: RandomEntropySource;
+  readonly scriptExecutor: ScriptExecutorApi;
+  readonly mediaAssets: MediaAssetApi;
+  /** Used only when seeded mode has no explicit session seed. */
+  readonly seededSeedSource?: RandomSeedSource;
+  /** Used only by unseeded random calls. */
+  readonly unseededRandomSource?: RandomEntropySource;
+  /** When supplied, replaces entropy and validates requests against a saved outcome log. */
+  readonly unseededRandomReplaySource?: RandomOutcomeReplaySource;
 }
 
 export interface SessionSnapshot extends SavedSessionState {
@@ -656,6 +783,7 @@ export interface TransitionTraceRecord {
     | 'node-transition'
     | 'time'
     | 'random'
+    | 'script'
     | 'diagnostic';
   readonly source: TraceSource;
   readonly reason: string;
@@ -667,6 +795,7 @@ export interface TransitionTraceRecord {
   readonly before?: Scalar;
   readonly after?: Scalar;
   readonly randomOutcome?: RandomOutcome;
+  readonly scriptTrace?: ScriptExecutionTraceRecord;
   readonly diagnosticCode?: string;
 }
 
@@ -729,7 +858,7 @@ export interface GameEngineApi {
 }
 
 export interface GameEngineFactoryApi {
-  createGameEngine(host: GameEngineHost): GameEngineApi;
+  createGameEngine(host: GameEngineHost, scripts: CompiledScriptBundle): GameEngineApi;
 }
 
 export interface ScriptCompilerApi {

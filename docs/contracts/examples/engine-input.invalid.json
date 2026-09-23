@@ -1,0 +1,20 @@
+{
+  "format": "dungeon-scrivener-engine-inputs",
+  "schemaVersion": 1,
+  "sessionStart": {
+    "randomSeed": 4294967296,
+    "wallClockEpochMilliseconds": 1000000,
+    "visibility": "visible",
+    "focused": true
+  },
+  "clockInput": {
+    "kind": "resume",
+    "wallClockEpochMilliseconds": 9007199254740992,
+    "visibility": "visible",
+    "focused": true
+  },
+  "playerInput": {
+    "kind": "command-text",
+    "rawText": "COUNT CANDLES 3"
+  }
+}

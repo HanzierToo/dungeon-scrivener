@@ -26,19 +26,10 @@
     },
     "conversationStack": [],
     "gameTimeMilliseconds": 0,
-    "randomnessMode": "unseeded",
-    "randomSeed": null,
-    "randomOutcomes": [
-      {
-        "ordinal": 0,
-        "sourceScriptId": "roll-script",
-        "provider": "unseeded",
-        "operation": "integer",
-        "minimum": 1,
-        "maximum": 3,
-        "value": 2
-      }
-    ],
+    "randomnessMode": "seeded",
+    "randomInitialSeed": 17,
+    "randomSeed": 17,
+    "randomOutcomes": [],
     "ruleGuards": {},
     "inventory": [],
     "entityTags": {

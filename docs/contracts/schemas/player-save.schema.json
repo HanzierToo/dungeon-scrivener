@@ -10,7 +10,7 @@
         "conversationId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "lineId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "returnNodeId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
-        "historyLineIds": { "type": "array", "items": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" } }
+        "historyLineIds": { "type": "array", "maxItems": 10000, "items": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" } }
       },
       "required": ["conversationId", "lineId", "returnNodeId", "historyLineIds"],
       "additionalProperties": false
@@ -23,7 +23,7 @@
         "quantity": { "type": "integer", "minimum": 1 },
         "containerItemId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "equippedSlot": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
-        "fields": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars" }
+        "fields": { "type": "object", "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars", "maxProperties": 10000 }
       },
       "required": ["owner", "itemId", "quantity", "fields"],
       "additionalProperties": false
@@ -31,7 +31,7 @@
     "randomOutcome": {
       "type": "object",
       "properties": {
-        "ordinal": { "type": "integer", "minimum": 0 },
+        "ordinal": { "type": "integer", "minimum": 0, "maximum": 16383 },
         "sourceScriptId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "provider": { "const": "unseeded" },
         "operation": { "enum": ["float", "integer"] },
@@ -39,7 +39,7 @@
         "maximum": { "type": "number" },
         "value": { "type": "number" }
       },
-      "required": ["ordinal", "provider", "operation", "value"],
+      "required": ["ordinal", "sourceScriptId", "provider", "operation", "value"],
       "additionalProperties": false
     }
   },
@@ -60,16 +60,18 @@
         "state": {
           "type": "object",
           "properties": {
-            "world": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars" },
+            "world": { "type": "object", "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars", "maxProperties": 10000 },
             "nodes": {
               "type": "object",
+              "maxProperties": 10000,
               "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
-              "additionalProperties": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars" }
+              "additionalProperties": { "type": "object", "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars", "maxProperties": 10000 }
             },
             "entities": {
               "type": "object",
+              "maxProperties": 10000,
               "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
-              "additionalProperties": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars" }
+              "additionalProperties": { "type": "object", "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars", "maxProperties": 10000 }
             }
           },
           "required": ["world", "nodes", "entities"],
@@ -77,11 +79,11 @@
         },
         "nodeVisitCounts": {
           "type": "object",
+          "maxProperties": 10000,
           "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
           "additionalProperties": { "type": "integer", "minimum": 0 }
         },
-        "conversationStack": { "type": "array", "items": { "$ref": "#/$defs/conversationContext" } },
-        "gameTimeMilliseconds": { "type": "integer", "minimum": 0 },
+        "gameTimeMilliseconds": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "randomnessMode": { "enum": ["seeded", "unseeded"] },
         "randomSeed": {
           "oneOf": [
@@ -89,20 +91,30 @@
             { "type": "null" }
           ]
         },
-        "randomOutcomes": { "type": "array", "items": { "$ref": "#/$defs/randomOutcome" } },
+        "randomOutcomes": { "type": "array", "maxItems": 16384, "items": { "$ref": "#/$defs/randomOutcome" } },
+        "randomInitialSeed": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+            { "type": "null" }
+          ]
+        },
         "ruleGuards": {
           "type": "object",
+          "maxProperties": 10000,
           "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
           "additionalProperties": { "type": "boolean" }
         },
-        "inventory": { "type": "array", "items": { "$ref": "#/$defs/inventoryStack" } },
+        "inventory": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/inventoryStack" } },
+        "conversationStack": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/conversationContext" } },
         "entityTags": {
           "type": "object",
+          "maxProperties": 10000,
           "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
           "additionalProperties": {
             "type": "array",
             "uniqueItems": true,
-            "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+            "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "maxItems": 256
           }
         },
         "clockState": {
@@ -112,13 +124,13 @@
             "focused": { "type": "boolean" },
             "lastObservedEpochMilliseconds": {
               "oneOf": [
-                { "type": "integer", "minimum": 0 },
+                { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
                 { "type": "null" }
               ]
             },
             "inactiveSinceEpochMilliseconds": {
               "oneOf": [
-                { "type": "integer", "minimum": 0 },
+                { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
                 { "type": "null" }
               ]
             }
@@ -127,18 +139,19 @@
           "additionalProperties": false
         }
       },
-      "required": ["currentNodeId", "state", "nodeVisitCounts", "conversationStack", "gameTimeMilliseconds", "randomnessMode", "randomSeed", "randomOutcomes", "ruleGuards", "inventory", "entityTags", "clockState"],
+      "required": ["currentNodeId", "state", "nodeVisitCounts", "conversationStack", "gameTimeMilliseconds", "randomnessMode", "randomInitialSeed", "randomSeed", "randomOutcomes", "ruleGuards", "inventory", "entityTags", "clockState"],
       "additionalProperties": false,
       "allOf": [
         {
           "if": { "properties": { "randomnessMode": { "const": "seeded" } } },
           "then": {
             "properties": {
-              "randomSeed": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              "randomSeed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+              "randomInitialSeed": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
             }
           },
           "else": {
-            "properties": { "randomSeed": { "type": "null" } }
+            "properties": { "randomSeed": { "type": "null" }, "randomInitialSeed": { "type": "null" } }
           }
         }
       ]

@@ -8,6 +8,8 @@ These are the corrected 1B draft contracts for downstream review. The user has a
 - `schemas/world.schema.json`: `world.json`, including nodes, separate navigation edges, entities, state, actions, rules, dialogue, inventory, time, and script references.
 - `schemas/locale.schema.json`: `locales/*.json`.
 - `schemas/script-ir.schema.json`: parsed source compiled to the shared interpreter representation.
+- `schemas/script-bundle.schema.json`: exact compiled IR set supplied to the engine before play.
+- `schemas/script-execution-result.schema.json`: serializable executor result and bounded trace records; capability callbacks are in-process TypeScript functions and are specified in `script-subset.md`.
 - `schemas/diagnostics.schema.json`: stable diagnostic reports.
 - `schemas/player-view.schema.json`: immutable render data consumed by player UI.
 - `schemas/project-vfs.schema.json`: metadata index for an in-memory virtual file tree.
@@ -16,7 +18,7 @@ These are the corrected 1B draft contracts for downstream review. The user has a
 - `schemas/player-save.schema.json`: portable player session payload inside a save ZIP.
 - `schemas/content-fingerprint.schema.json`: digest input manifest and resulting digest.
 
-Each document schema has a `.valid.json` and `.invalid.json` example under `examples/`. `npm run check:contracts` checks the examples against all schemas, validates every fixture JSON document, checks cross-file IDs/locale/asset/script references, and parses all three fixture script samples. The Vitest suite remains empty at this task boundary.
+Each document schema has a `.valid.json` and `.invalid.json` example under `examples/`. `npm run check:contracts` checks the examples against all schemas, validates every fixture JSON document, checks cross-file IDs/locale/asset/script references and typing-sound fingerprint inclusion, checks save/session size and replay-log integrity, and parses all three fixture script samples. The Vitest suite remains empty at this task boundary.
 
 Additional semantics are specified in `data-model.md`, `script-subset.md`, `budgets.md`, and `archive-save-fingerprint.md`. Contract checking validates schema syntax/references, example classifications, fixture JSON and cross-references, media hashes, and script syntax. It does not execute scripts, run game transitions, or parse project ZIP archives.
 

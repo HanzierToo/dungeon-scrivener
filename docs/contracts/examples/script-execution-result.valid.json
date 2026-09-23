@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "instructionsExecuted": 12,
+  "trace": [
+    { "sequence": 0, "scriptId": "keeper-check", "kind": "activation-start", "reason": "run-script effect from rule keeper-hears-chime" },
+    { "sequence": 1, "scriptId": "keeper-check", "kind": "capability-call", "capability": "api.randomInt", "sourceSpan": { "path": "scripts/keeper.js", "startLine": 2, "startColumn": 18, "endLine": 2, "endColumn": 38 }, "reason": "integer draw accepted" },
+    { "sequence": 2, "scriptId": "keeper-check", "kind": "activation-end", "instructionsExecuted": 12, "reason": "main returned" }
+  ]
+}

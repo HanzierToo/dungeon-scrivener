@@ -407,6 +407,16 @@
         "enabled"
       ],
       "additionalProperties": false
+    },
+    "typingSoundAsset": {
+      "type": "object",
+      "properties": {
+        "assetId": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "mediaType": { "const": "audio/wav" },
+        "byteLength": { "type": "integer", "minimum": 44, "maximum": 67108864 }
+      },
+      "required": ["assetId", "mediaType", "byteLength"],
+      "additionalProperties": false
     }
   },
   "properties": {
@@ -601,6 +611,38 @@
       ],
       "additionalProperties": false
     },
+    "typingSounds": {
+      "type": "object",
+      "properties": {
+        "mappings": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "properties": {
+              "target": {
+                "oneOf": [
+                  { "type": "object", "properties": { "kind": { "const": "key" }, "code": { "type": "string", "minLength": 1, "maxLength": 64 } }, "required": ["kind", "code"], "additionalProperties": false },
+                  { "type": "object", "properties": { "kind": { "const": "group" }, "group": { "enum": ["letters", "digits", "space", "punctuation", "editing", "other"] } }, "required": ["kind", "group"], "additionalProperties": false }
+                ]
+              },
+              "asset": { "$ref": "#/$defs/typingSoundAsset" },
+              "volume": { "type": "number", "minimum": 0, "maximum": 1 }
+            },
+            "required": ["target", "asset", "volume"],
+            "additionalProperties": false
+          }
+        },
+        "fallback": {
+          "oneOf": [
+            { "type": "object", "properties": { "kind": { "const": "silent" } }, "required": ["kind"], "additionalProperties": false },
+            { "type": "object", "properties": { "kind": { "const": "asset" }, "asset": { "$ref": "#/$defs/typingSoundAsset" }, "volume": { "type": "number", "minimum": 0, "maximum": 1 } }, "required": ["kind", "asset", "volume"], "additionalProperties": false }
+          ]
+        }
+      },
+      "required": ["mappings", "fallback"],
+      "additionalProperties": false
+    },
     "diagnostics": {
       "type": "array",
       "items": {
@@ -617,6 +659,7 @@
     "currentNode",
     "choices",
     "commands",
+    "typingSounds",
     "diagnostics"
   ],
   "additionalProperties": false

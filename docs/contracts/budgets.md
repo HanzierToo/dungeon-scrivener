@@ -35,6 +35,7 @@ Paths are relative, slash-separated Unicode strings. Reject empty segments, `.` 
 | Iterations per individual `while` invocation | 1,000 |
 | Script activations per top-level action | 256 |
 | Aggregate executed IR instructions per top-level action | 250,000 |
+| Script capability calls per top-level action | 10,000 |
 | Raw uint32 draws per random integer request | 64 |
 | Helper call depth | 16 |
 | Members in one array or map | 1,024 |
@@ -44,6 +45,45 @@ Paths are relative, slash-separated Unicode strings. Reject empty segments, `.` 
 | Requested effects/events per action from scripts | 256 |
 
 IR instruction fuel is shared across all helper calls in one activation. A nested while loop also consumes the total instruction budget. Every script activation reached directly or through an event/rule cascade counts toward both action-wide script limits. Every API request counts toward the per-action request limit. A limit breach aborts the containing action transaction, including effects already requested by any script or rule in that action. The failed transition returns the original snapshot plus diagnostics/error trace; none of its state, tags, inventory, time, rule guards, RNG state, or random outcomes commit. Requested-effect count includes api.request and api.emit calls, whether or not a later rule consumes the event.
+
+The engine passes the executor `maxInstructions = min(50,000, remaining action instructions)`, as well as remaining action-wide capability-call, effect/event-request, and trace-record budgets. The executor stops before executing an instruction or emitting executor trace records beyond those values. The engine independently counts every `api.*` capability call (including reads, tag checks, random calls, requests and emits) and rejects call 10,001 synchronously. It adds each returned `instructionsExecuted` count to the action total and treats a negative, non-integer, or over-limit report, or a trace longer than its passed allowance, as a fatal executor contract violation. Effect/event requests are counted separately and rejected synchronously at request 257; the rejection fails the activation and rolls back the action. The 16,384th unseeded outcome may be committed; a later unseeded draw fails the action rather than omitting or truncating history. If neither entropy nor replay source is configured when an unseeded random call occurs, that action fails with a randomness diagnostic. All trace records, including script trace records, count toward the action cap of 20,000.
+
+## Raw command input and matching
+
+| Limit | Maximum |
+| --- | ---: |
+| Raw command UTF-8 bytes | 4,096 |
+| Raw command Unicode scalar values | 1,024 |
+| Normalized command tokens | 128 |
+| Commands in the effective action set | 256 |
+| Patterns per command | 32 |
+| Parameters per command | 16 |
+| Pattern UTF-8 bytes | 4,096 |
+| Pattern tokens | 128 |
+| Token comparisons per match operation | 1,048,576 |
+
+Check UTF-16 validity and raw byte/scalar limits before normalization. Then NFC-normalize, collapse whitespace, and enforce normalized token limits. A boundary value is accepted. An over-limit or malformed Unicode input returns `invalid-input` with a diagnostic; it does not truncate text, match a prefix, advance time, or mutate the session. If a project exceeds the effective command, pattern, parameter, or matching-work bound, model validation rejects that action set and play is blocked until corrected.
+
+## Session and player-save data
+
+| Limit | Maximum |
+| --- | ---: |
+| Canonical serialized session JSON | 8 MiB |
+| Expanded `save.json` member | 8 MiB |
+| Player-save ZIP input | 8 MiB |
+| JSON nesting depth | 64 |
+| Unseeded random outcomes in one session | 16,384 |
+| Inventory stacks in one session | 10,000 |
+| Saved conversation contexts | 64 |
+| Dialogue history IDs per context | 10,000 |
+| Saved epoch timestamp | 0 through `Number.MAX_SAFE_INTEGER` milliseconds |
+| Per-action game time | 0 through `Number.MAX_SAFE_INTEGER` milliseconds |
+
+Before committing a session transition and before encoding a save, measure the canonical serialized session; exceeding 8 MiB fails the transition/save with a diagnostic and retains the old session. On import, reject an over-limit archive/member before replacing the active session. Do not truncate state, inventory, conversation history, seeded state, or random outcome history. When a collection limit is reached, the operation that would exceed it fails atomically. A save that cannot fit is a save failure; it is never reported as successful.
+
+## Clock inputs
+
+Clock input timestamps must be safe integers in the inclusive range 0 through `Number.MAX_SAFE_INTEGER`. `maxCatchUpMilliseconds` is at most 86,400,000 (one day). Repeated timestamps are valid no-op observations. A timestamp earlier than the persisted baseline is rejected with a clock diagnostic; it changes neither baseline nor game time, so the host may retry with a valid timestamp. Invalid visibility/focus values, invalid timestamps, arithmetic overflow, and invalid start baselines are rejected without mutating the session. Pause and bounded catch-up behavior still apply to valid large gaps; credited game time must remain within the safe-integer bound. Clock inputs are never coerced or clamped.
 
 ## Rules, conditions, and trace
 

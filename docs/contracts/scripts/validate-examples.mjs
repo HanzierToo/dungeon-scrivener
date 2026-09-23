@@ -109,9 +109,40 @@ function canonicalJson(value) {
 }
 
 function isWav(bytes) {
-  return bytes.length >= 12
-    && bytes.subarray(0, 4).toString("ascii") === "RIFF"
-    && bytes.subarray(8, 12).toString("ascii") === "WAVE";
+  if (bytes.length < 44 || bytes.subarray(0, 4).toString("ascii") !== "RIFF"
+      || bytes.readUInt32LE(4) !== bytes.length - 8 || bytes.subarray(8, 12).toString("ascii") !== "WAVE") return false;
+  let offset = 12;
+  let format;
+  let dataLength;
+  while (offset < bytes.length) {
+    if (offset + 8 > bytes.length) return false;
+    const chunkId = bytes.subarray(offset, offset + 4).toString("ascii");
+    const chunkLength = bytes.readUInt32LE(offset + 4);
+    const chunkStart = offset + 8;
+    const chunkEnd = chunkStart + chunkLength;
+    if (chunkEnd > bytes.length) return false;
+    if (chunkId === "fmt ") {
+      if (format || chunkLength < 16) return false;
+      const encoding = bytes.readUInt16LE(chunkStart);
+      const channels = bytes.readUInt16LE(chunkStart + 2);
+      const sampleRate = bytes.readUInt32LE(chunkStart + 4);
+      const byteRate = bytes.readUInt32LE(chunkStart + 8);
+      const blockAlign = bytes.readUInt16LE(chunkStart + 12);
+      const bitsPerSample = bytes.readUInt16LE(chunkStart + 14);
+      const supportedBits = encoding === 1 ? [8, 16, 24, 32].includes(bitsPerSample) : encoding === 3 && bitsPerSample === 32;
+      if (![1, 3].includes(encoding) || channels < 1 || channels > 2 || sampleRate < 8000 || sampleRate > 192000
+          || !supportedBits || blockAlign !== channels * (bitsPerSample / 8)
+          || byteRate !== sampleRate * blockAlign) return false;
+      format = { blockAlign };
+    } else if (chunkId === "data") {
+      if (dataLength !== undefined) return false;
+      dataLength = chunkLength;
+    }
+    offset = chunkEnd + (chunkLength % 2);
+    if (offset > bytes.length) return false;
+  }
+  return offset === bytes.length && Boolean(format) && dataLength !== undefined
+    && dataLength > 0 && dataLength % format.blockAlign === 0;
 }
 
 function normalizeDisplay(text) {
@@ -182,9 +213,14 @@ function parseCapture(value, valueType) {
 }
 
 function matchCommandSet(commands, rawText) {
+  const hasInvalidSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(rawText);
+  if (hasInvalidSurrogate || Buffer.byteLength(rawText, "utf8") > 4096 || Array.from(rawText).length > 1024 || commands.length > 256) {
+    return { kind: "invalid-input", reason: "input or effective command set exceeds its contract limit" };
+  }
   const displayText = normalizeDisplay(rawText);
   const foldedTokens = normalizeForMatch(rawText).split(" ").filter(Boolean);
   const displayTokens = displayText.split(" ").filter(Boolean);
+  if (foldedTokens.length > 128) return { kind: "invalid-input", reason: "normalized command exceeds 128 tokens" };
   const matches = new Map();
   for (const command of commands) {
     const parameterById = new Map((command.parameters ?? []).map((parameter) => [parameter.id, parameter]));
@@ -546,12 +582,15 @@ function validateFixture(fixtureName) {
   }
 
   for (const command of allCommands) {
+    if ((command.parameters ?? []).length > 16) fail(fixtureName, "command " + command.id + " exceeds 16 parameters");
     const parameterIds = (command.parameters ?? []).map((parameter) => parameter.id);
     if (new Set(parameterIds).size !== parameterIds.length) fail(fixtureName, "command " + command.id + " has duplicate parameter IDs");
     const parameterSet = new Set(parameterIds);
     const seenPatterns = new Set();
     for (const pattern of command.patterns ?? []) {
+      if (Buffer.byteLength(pattern, "utf8") > 4096) fail(fixtureName, "command " + command.id + " has a pattern exceeding 4096 UTF-8 bytes");
       const normalized = normalizeForMatch(pattern);
+      if (normalized.split(" ").filter(Boolean).length > 128) fail(fixtureName, "command " + command.id + " has a pattern exceeding 128 tokens");
       if (seenPatterns.has(normalized)) fail(fixtureName, "command " + command.id + " repeats a normalized pattern");
       seenPatterns.add(normalized);
       const used = [];
@@ -687,6 +726,9 @@ function validateFixture(fixtureName) {
     });
   }
   fingerprintFiles.sort((left, right) => Buffer.compare(Buffer.from(left.path, "utf8"), Buffer.from(right.path, "utf8")));
+  for (const hash of typingSoundHashes) {
+    if (!fingerprintFiles.some((file) => file.path === "assets/sha256/" + hash)) fail(fixtureName, "typing-sound asset is absent from the playable fingerprint: " + hash);
+  }
   const fingerprintInput = {
     format: "dungeon-scrivener-content-fingerprint-input",
     schemaVersion: 1,
@@ -706,12 +748,16 @@ function validateFixture(fixtureName) {
   }
   for (const [path, save] of saveDocs) {
     const label = fixtureName + "/" + path;
+    if (readFileSync(files.get(path)).length > 8 * 1024 * 1024) fail(label, "save JSON exceeds the 8 MiB expanded member limit");
+    if (Buffer.byteLength(canonicalJson(save.session), "utf8") > 8 * 1024 * 1024) fail(label, "serialized session exceeds the 8 MiB session limit");
     if (save.projectId !== manifest.projectId) fail(fixtureName + "/" + path, "save projectId differs from project manifest");
     if (!nodes.has(save.session.currentNodeId)) fail(label, "currentNodeId references a missing node");
     if (save.session.randomnessMode !== world.settings.randomness.mode) fail(fixtureName + "/" + path, "save randomnessMode differs from world settings");
-    if (save.session.randomnessMode === "seeded" ? save.session.randomSeed === null : save.session.randomSeed !== null) {
-      fail(fixtureName + "/" + path, "randomnessMode and randomSeed disagree");
+    const hasSeedState = save.session.randomInitialSeed !== null && save.session.randomSeed !== null;
+    if (save.session.randomnessMode === "seeded" ? !hasSeedState : save.session.randomInitialSeed !== null || save.session.randomSeed !== null) {
+      fail(label, "randomnessMode, randomInitialSeed, and current randomSeed disagree");
     }
+    if (save.session.randomnessMode === "seeded" && save.session.randomOutcomes.length > 0) fail(label, "seeded saves must not contain unseeded outcomes");
     for (const [key, value] of Object.entries(save.session.state.world)) {
       const definition = (world.stateDefinitions ?? []).find((field) => field.scopeKind === "world" && field.key === key);
       if (!definition) fail(label, "saved world state contains undeclared key " + key);
@@ -769,6 +815,9 @@ function validateFixture(fixtureName) {
       if (save.session.randomnessMode !== "unseeded") fail(label, "only unseeded draws may be stored as random outcomes");
       if (!scripts.has(outcome.sourceScriptId)) fail(label, "random outcome references missing source script " + outcome.sourceScriptId);
     }
+    for (let index = 0; index < save.session.randomOutcomes.length; index += 1) {
+      if (save.session.randomOutcomes[index].ordinal !== index) fail(label, "random outcome ordinals must be contiguous from zero");
+    }
     const expectedEntityIds = [...entities.keys()].sort();
     const savedEntityIds = Object.keys(save.session.entityTags ?? {}).sort();
     if (expectedEntityIds.join("|") !== savedEntityIds.join("|")) fail(fixtureName + "/" + path, "entityTags must persist every known entity exactly once");
@@ -823,6 +872,8 @@ function validateFixture(fixtureName) {
     if (normalizedString.kind !== "matched" || normalizedString.commandId !== "ask-about-topic" || normalizedString.parameters.topic !== "RAiN") {
       fail(fixtureName, "one-token string command example did not preserve normalized source spelling");
     }
+    const overLimit = matchCommandSet(commands, "x".repeat(4097));
+    if (overLimit.kind !== "invalid-input") fail(fixtureName, "over-limit raw command input must be rejected without truncation");
   }
 
   checkedFixtureReferences += 1;

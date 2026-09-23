@@ -63,5 +63,19 @@
   },
   "choices": [],
   "commands": [],
+  "typingSounds": {
+    "mappings": [
+      {
+        "target": { "kind": "key", "code": "KeyA" },
+        "asset": {
+          "assetId": "sha256:dadc41ce60b07eb817ef2b92628e664126cd877fcfb0628278e89bd7f9acb690",
+          "mediaType": "audio/wav",
+          "byteLength": 35324
+        },
+        "volume": 1.5
+      }
+    ],
+    "fallback": { "kind": "silent" }
+  },
   "diagnostics": []
 }
