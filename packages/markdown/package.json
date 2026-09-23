@@ -1,5 +1,5 @@
 {
-  "name": "@dungeon-scrivener/model",
+  "name": "@dungeon-scrivener/markdown",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,5 +9,9 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run src/index.test.ts"
+  },
+  "dependencies": {
+    "@dungeon-scrivener/model": "0.0.0",
+    "markdown-it": "15.0.2"
   }
 }

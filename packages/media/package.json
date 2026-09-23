@@ -1,13 +1,12 @@
 {
-  "name": "@dungeon-scrivener/model",
-  "version": "0.0.0",
+  "name": "@dungeon-scrivener/media",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run src/index.test.ts"
   }
 }
