@@ -291,7 +291,6 @@ A dismissible unsaved-work reminder appears after 10–15 minutes of unsaved wor
 
 ## Contract gaps to resolve before promising these controls
 
-1. **Save compatibility diagnostic mismatch.** `archive-save-fingerprint.md` says a compatibility mismatch rejects with a diagnostic, while `SaveCompatibilityResult` returns only mismatch keys. The UI can still identify each field and render saved/current values from the save and target, but the contract does not define a stable diagnostic code/message for this case.
-2. **Unseeded replay controls.** Saved unseeded outcomes and a call-verified replay source/harness are defined. The current player/debugger interface contract does not define how a creator selects the outcome log and matching action transcript or how replay mismatch is presented.
-3. **Player-wide typing-sound volume.** The contract supports author-configured per-target and fallback volumes, but no player-wide volume override or mute setting. The wireframe exposes assigned volumes in author settings and does not promise a player master slider.
-4. **Script summary text.** A declared script has ID, language, path, and `main` entrypoint; the contract has no author-authored summary field. The Apprentice script card therefore shows only those declared details and an **Edit in Sage** link.
+1. **Unseeded replay controls.** Saved unseeded outcomes and a call-verified replay source/harness are defined. The current player/debugger interface contract does not define how a creator selects the outcome log and matching action transcript or how replay mismatch is presented.
+2. **Player-wide typing-sound volume.** The contract supports author-configured per-target and fallback volumes, but no player-wide volume override or mute setting. The wireframe exposes assigned volumes in author settings and does not promise a player master slider.
+3. **Script summary text.** A declared script has ID, language, path, and `main` entrypoint; the contract has no author-authored summary field. The Apprentice script card therefore shows only those declared details and an **Edit in Sage** link.

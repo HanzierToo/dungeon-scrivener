@@ -877,6 +877,7 @@ export interface SaveCompatibilityTarget {
 
 export type SaveCompatibilityMismatch = 'projectId' | 'gameVersion' | 'engineVersion' | 'contentFingerprint';
 
+/** Incompatible results list every field that differs from the target. */
 export type SaveCompatibilityResult =
   | { readonly compatible: true; readonly mismatches: readonly [] }
   | { readonly compatible: false; readonly mismatches: readonly [SaveCompatibilityMismatch, ...SaveCompatibilityMismatch[]] };
