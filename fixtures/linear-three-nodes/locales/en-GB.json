@@ -1,0 +1,15 @@
+{
+  "format": "dungeon-scrivener-locale",
+  "schemaVersion": 1,
+  "locale": "en-GB",
+  "strings": {
+    "gate-title": "The Old Gate",
+    "gate-content": "A note reads: “夜が来る前に、灯りをつけて。” The bridge is barely visible through the rain.",
+    "open-gate-label": "Raise the lantern and open the gate",
+    "bridge-title": "The Stone Bridge",
+    "bridge-content": "The lantern reveals three slick stones. Across the river, one warm window answers.",
+    "cross-bridge-label": "Cross to the light",
+    "ending-title": "Home Before Dark",
+    "ending-content": "You reach the lantern house before nightfall. The crossing is complete."
+  }
+}

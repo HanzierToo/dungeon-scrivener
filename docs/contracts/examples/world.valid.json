@@ -1,0 +1,91 @@
+{
+  "format": "dungeon-scrivener-world",
+  "schemaVersion": 1,
+  "entryNodeId": "old-gate",
+  "settings": {
+    "time": {
+      "mode": "per-action",
+      "millisecondsPerAction": 1000,
+      "hiddenBehavior": "pause",
+      "maxCatchUpMilliseconds": 0,
+      "showClockHud": true
+    }
+  },
+  "savePolicy": {
+    "enabled": true,
+    "slotCount": 1,
+    "allowedLocation": "anywhere"
+  },
+  "stateDefinitions": [
+    {
+      "key": "trust",
+      "scopeKind": "world",
+      "valueType": "integer",
+      "defaultValue": 0
+    }
+  ],
+  "worldState": {
+    "trust": 0
+  },
+  "nodes": [
+    {
+      "id": "old-gate",
+      "parentId": null,
+      "visitable": true,
+      "title": {
+        "kind": "literal",
+        "text": "The old gate"
+      },
+      "content": {
+        "kind": "literal",
+        "text": "Rain taps the stone."
+      }
+    }
+  ],
+  "navigationEdges": [],
+  "entityDefinitions": [
+    {
+      "id": "traveler",
+      "name": {
+        "kind": "literal",
+        "text": "A traveler"
+      },
+      "fields": [
+        {
+          "key": "mood",
+          "valueType": "string",
+          "defaultValue": "calm"
+        }
+      ],
+      "allowedTags": [
+        "known"
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "id": "traveler",
+      "definitionId": "traveler",
+      "name": {
+        "kind": "literal",
+        "text": "Mira"
+      },
+      "tags": [
+        "known"
+      ],
+      "state": {
+        "mood": "calm"
+      }
+    }
+  ],
+  "actionDefaults": {
+    "choices": [],
+    "commands": []
+  },
+  "eventDefinitions": [],
+  "rules": [],
+  "conversations": [],
+  "itemDefinitions": [],
+  "initialInventory": [],
+  "scripts": []
+}

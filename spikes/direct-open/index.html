@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'none'; connect-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src file: data: blob:; media-src file: data: blob:; frame-src file:">
+  <title>The Lantern at Dusk . Direct-open feasibility</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.55 system-ui, sans-serif; }
+    body { max-width: 58rem; margin: 2rem auto; padding: 0 1rem 3rem; }
+    button, input { font: inherit; margin: .25rem; padding: .45rem .7rem; }
+    button { cursor: pointer; }
+    .card { border: 1px solid #8887; border-radius: .7rem; padding: 1rem; margin: 1rem 0; }
+    .media { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    img { width: 12rem; height: 8rem; object-fit: contain; background: #111; }
+    pre { overflow-wrap: anywhere; white-space: pre-wrap; }
+    #sandbox { width: 100%; min-height: 13rem; border: 1px dashed #888; }
+    .status { font-weight: 650; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>The Lantern at Dusk</h1>
+    <p id="story">At the old gate, a note reads: <strong>“夜が来る前に、灯りをつけて。”</strong> A traveller says, “Mind the wet stones.”</p>
+
+    <section class="card media" aria-label="Local media">
+      <img id="map" src="assets/lantern-map.png" alt="A blue trail leading to a small amber lantern">
+      <div>
+        <p>Map and audio are loaded from files beside this page.</p>
+        <audio id="ambience" controls preload="auto" src="assets/night-birds.wav">Audio is unavailable in this browser.</audio>
+        <p class="status" id="media-status">Waiting for local media…</p>
+      </div>
+    </section>
+
+    <section class="card" aria-label="Story actions">
+      <p>Lantern courage: <output id="courage">0</output>. Chapters seen: <output id="chapters">1</output>.</p>
+      <button id="light" type="button">Light the lantern</button>
+      <button id="travel" type="button">Follow the blue trail</button>
+      <p id="action-status" class="status" aria-live="polite">Choose an action.</p>
+    </section>
+
+    <section class="card" aria-label="Player save ZIP">
+      <h2>Player save ZIP</h2>
+      <button id="download" type="button">Download save ZIP</button>
+      <label for="save-file">Import save ZIP:</label>
+      <input id="save-file" type="file" accept=".zip,application/zip">
+      <p class="status" id="save-status" aria-live="polite">No imported save.</p>
+    </section>
+
+    <section class="card" aria-label="Restricted script feasibility">
+      <h2>Restricted script bridge</h2>
+      <p>The example runs in an opaque-origin <code>sandbox="allow-scripts"</code> frame. It receives a snapshot and requests one validated effect through messages.</p>
+      <p id="isolation-status" class="status" aria-live="polite">Waiting for the sandbox report…</p>
+      <iframe id="sandbox" title="Opaque script sandbox" sandbox="allow-scripts"></iframe>
+      <pre id="trace" aria-live="polite"></pre>
+    </section>
+
+    <section class="card" aria-label="Feasibility details">
+      <h2>Runtime checks</h2>
+      <ul>
+        <li>One inline classic script; no module imports or external script files.</li>
+        <li>Content Security Policy blocks connections and remote media.</li>
+        <li>The script frame has a unique origin and no access to the parent DOM or storage.</li>
+        <li>ZIP import accepts only uncompressed, bounded entries and checks CRC32.</li>
+      </ul>
+      <pre id="runtime-report"></pre>
+    </section>
+  </main>
+
+  <script>
+  'use strict';
+
+  const gameId = 'dungeon-scrivener-direct-open-1a';
+  const state = { scene: 'old-gate', courage: 0, chaptersSeen: 1 };
+  const token = 'bridge-' + Math.random().toString(36).slice(2);
+  const log = document.getElementById('trace');
+  const runtimeReport = document.getElementById('runtime-report');
+  const sandbox = document.getElementById('sandbox');
+  const checks = [];
+  let expectedChildOrigin = 'null';
+
+  function report(text) {
+    checks.push(text);
+    runtimeReport.textContent = checks.join('\n');
+  }
+
+  function renderState() {
+    document.getElementById('courage').value = String(state.courage);
+    document.getElementById('chapters').value = String(state.chaptersSeen);
+  }
+
+  document.getElementById('light').addEventListener('click', () => {
+    state.courage += 1;
+    renderState();
+    document.getElementById('action-status').textContent = 'The lantern glows. The blue trail is visible.';
+  });
+
+  document.getElementById('travel').addEventListener('click', () => {
+    state.scene = state.scene === 'old-gate' ? 'blue-trail' : 'old-gate';
+    state.chaptersSeen += 1;
+    renderState();
+    document.getElementById('action-status').textContent = 'Now at ' + state.scene + '.';
+  });
+
+  const image = document.getElementById('map');
+  image.addEventListener('load', () => {
+    document.getElementById('media-status').textContent = 'PASS: local PNG loaded (' + image.naturalWidth + ' × ' + image.naturalHeight + ').';
+    report('local image: loaded ' + image.naturalWidth + ' × ' + image.naturalHeight);
+  });
+  image.addEventListener('error', () => {
+    document.getElementById('media-status').textContent = 'FAIL: local PNG did not load.';
+    report('local image: ERROR');
+  });
+  document.getElementById('ambience').addEventListener('loadeddata', () => {
+    document.getElementById('media-status').textContent = 'PASS: local PNG and WAV loaded.';
+    report('local audio: loaded data, ' + document.getElementById('ambience').duration.toFixed(2) + ' s');
+  });
+  document.getElementById('ambience').addEventListener('error', () => {
+    report('local audio: ERROR code ' + document.getElementById('ambience').error.code);
+  });
+
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    for (const byte of bytes) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function makeStoredZip(entries) {
+    const encoder = new TextEncoder();
+    const localParts = [];
+    const directoryParts = [];
+    let offset = 0;
+    for (const [name, value] of entries) {
+      const nameBytes = encoder.encode(name);
+      const data = value instanceof Uint8Array ? value : encoder.encode(value);
+      const crc = crc32(data);
+      const local = new Uint8Array(30 + nameBytes.length + data.length);
+      const localView = new DataView(local.buffer);
+      localView.setUint32(0, 0x04034b50, true);
+      localView.setUint16(4, 20, true);
+      localView.setUint16(6, 0x0800, true);
+      localView.setUint16(8, 0, true);
+      localView.setUint32(14, crc, true);
+      localView.setUint32(18, data.length, true);
+      localView.setUint32(22, data.length, true);
+      localView.setUint16(26, nameBytes.length, true);
+      local.set(nameBytes, 30);
+      local.set(data, 30 + nameBytes.length);
+      localParts.push(local);
+
+      const central = new Uint8Array(46 + nameBytes.length);
+      const centralView = new DataView(central.buffer);
+      centralView.setUint32(0, 0x02014b50, true);
+      centralView.setUint16(4, 20, true);
+      centralView.setUint16(6, 20, true);
+      centralView.setUint16(8, 0x0800, true);
+      centralView.setUint16(10, 0, true);
+      centralView.setUint32(16, crc, true);
+      centralView.setUint32(20, data.length, true);
+      centralView.setUint32(24, data.length, true);
+      centralView.setUint16(28, nameBytes.length, true);
+      centralView.setUint32(42, offset, true);
+      central.set(nameBytes, 46);
+      directoryParts.push(central);
+      offset += local.length;
+    }
+    const directorySize = directoryParts.reduce((size, part) => size + part.length, 0);
+    const entryCount = entries.length;
+    const end = new Uint8Array(22);
+    const endView = new DataView(end.buffer);
+    endView.setUint32(0, 0x06054b50, true);
+    endView.setUint16(8, entryCount, true);
+    endView.setUint16(10, entryCount, true);
+    endView.setUint32(12, directorySize, true);
+    endView.setUint32(16, offset, true);
+    return new Blob([...localParts, ...directoryParts, end], { type: 'application/zip' });
+  }
+
+  function parseStoredZip(bytes) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const min = Math.max(0, bytes.length - 65557);
+    let end = -1;
+    for (let index = bytes.length - 22; index >= min; index -= 1) {
+      if (view.getUint32(index, true) === 0x06054b50) { end = index; break; }
+    }
+    if (end < 0) throw new Error('ZIP end record was not found.');
+    const disk = view.getUint16(end + 4, true);
+    const centralDisk = view.getUint16(end + 6, true);
+    const entriesOnDisk = view.getUint16(end + 8, true);
+    const count = view.getUint16(end + 10, true);
+    const commentLength = view.getUint16(end + 20, true);
+    const directorySize = view.getUint32(end + 12, true);
+    const directoryOffset = view.getUint32(end + 16, true);
+    if (disk !== 0 || centralDisk !== 0 || entriesOnDisk !== count || count > 16
+        || directoryOffset + directorySize > end || end + 22 + commentLength !== bytes.length) {
+      throw new Error('Unsupported or oversized ZIP layout.');
+    }
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const entries = new Map();
+    let cursor = directoryOffset;
+    for (let index = 0; index < count; index += 1) {
+      if (cursor + 46 > end || view.getUint32(cursor, true) !== 0x02014b50) throw new Error('Invalid ZIP directory entry.');
+      const flags = view.getUint16(cursor + 8, true);
+      const method = view.getUint16(cursor + 10, true);
+      const expectedCrc = view.getUint32(cursor + 16, true);
+      const compressedSize = view.getUint32(cursor + 20, true);
+      const size = view.getUint32(cursor + 24, true);
+      const nameLength = view.getUint16(cursor + 28, true);
+      const extraLength = view.getUint16(cursor + 30, true);
+      const commentLength = view.getUint16(cursor + 32, true);
+      const localOffset = view.getUint32(cursor + 42, true);
+      const next = cursor + 46 + nameLength + extraLength + commentLength;
+      if ((flags & ~0x0800) !== 0 || method !== 0 || compressedSize !== size || size > 65536 || next > end) {
+        throw new Error('Only small, unencrypted, stored ZIP entries are supported.');
+      }
+      const name = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength));
+      const segments = name.split('/');
+      const unsafePath = !name || name.startsWith('/') || /^[A-Za-z]:/.test(name)
+        || name.includes('\\') || name.includes('\0') || segments.some((part) => !part || part === '.' || part === '..');
+      if (unsafePath || entries.has(name)) throw new Error('Unsafe or duplicate ZIP path.');
+      if (localOffset + 30 > directoryOffset || view.getUint32(localOffset, true) !== 0x04034b50) throw new Error('Invalid ZIP local entry.');
+      const localNameLength = view.getUint16(localOffset + 26, true);
+      const localExtraLength = view.getUint16(localOffset + 28, true);
+      const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+      const dataEnd = dataStart + size;
+      if (dataEnd > directoryOffset || decoder.decode(bytes.subarray(localOffset + 30, localOffset + 30 + localNameLength)) !== name) {
+        throw new Error('ZIP entry points outside its data area.');
+      }
+      const data = bytes.slice(dataStart, dataEnd);
+      if (crc32(data) !== expectedCrc) throw new Error('ZIP CRC check failed.');
+      entries.set(name, data);
+      cursor = next;
+    }
+    if (cursor !== directoryOffset + directorySize) throw new Error('Unexpected trailing ZIP directory data.');
+    return entries;
+  }
+
+  document.getElementById('download').addEventListener('click', () => {
+    const save = {
+      formatVersion: 1,
+      gameId,
+      scene: state.scene,
+      courage: state.courage,
+      chaptersSeen: state.chaptersSeen
+    };
+    const blob = makeStoredZip([['session-save.json', JSON.stringify(save, null, 2)]]);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'dungeon-scrivener-save.zip';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    document.getElementById('save-status').textContent = 'Downloaded a ZIP snapshot of the current player state.';
+  });
+
+  document.getElementById('save-file').addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    try {
+      if (file.size > 131072) throw new Error('Save ZIP exceeds the 128 KiB import limit.');
+      const entries = parseStoredZip(new Uint8Array(await file.arrayBuffer()));
+      const payload = entries.get('session-save.json');
+      if (!payload) throw new Error('Save ZIP has no session-save.json.');
+      const save = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(payload));
+      if (save.formatVersion !== 1 || save.gameId !== gameId) throw new Error('This save belongs to a different game or format.');
+      if (!Number.isInteger(save.courage) || !Number.isInteger(save.chaptersSeen) || typeof save.scene !== 'string') {
+        throw new Error('Save contents are invalid.');
+      }
+      state.scene = save.scene;
+      state.courage = save.courage;
+      state.chaptersSeen = save.chaptersSeen;
+      renderState();
+      document.getElementById('save-status').textContent = 'PASS: imported scene “' + state.scene + '”, courage ' + state.courage + ', chapters ' + state.chaptersSeen + '.';
+    } catch (error) {
+      document.getElementById('save-status').textContent = 'FAIL: ' + error.message;
+    } finally {
+      event.target.value = '';
+    }
+  });
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== sandbox.contentWindow || event.origin !== expectedChildOrigin) return;
+    const message = event.data;
+    if (!message || typeof message.type !== 'string') return;
+    if (message.type === 'READY') {
+      if (message.token !== undefined) return;
+      sandbox.contentWindow.postMessage({ type: 'INIT', token, snapshot: { ...state } }, '*');
+      const originReport = 'sandbox origin: ' + JSON.stringify(event.origin) + ' (opaque)';
+      report(originReport);
+      log.textContent += originReport + '\n';
+      return;
+    }
+    if (message.token !== token) return;
+    if (message.type === 'TRACE' && typeof message.text === 'string') {
+      log.textContent += message.text + '\n';
+      return;
+    }
+    if (message.type === 'READ_STATE') {
+      sandbox.contentWindow.postMessage({ type: 'STATE_RESULT', token, snapshot: { ...state } }, '*');
+      return;
+    }
+    if (message.type === 'REQUEST_EFFECT') {
+      const valid = message.effect && message.effect.type === 'add-courage' && Number.isInteger(message.effect.amount) && message.effect.amount === 1;
+      if (!valid) {
+        sandbox.contentWindow.postMessage({ type: 'EFFECT_RESULT', token, accepted: false, reason: 'unsupported effect' }, '*');
+        return;
+      }
+      state.courage += message.effect.amount;
+      renderState();
+      sandbox.contentWindow.postMessage({ type: 'EFFECT_RESULT', token, accepted: true, snapshot: { ...state } }, '*');
+      return;
+    }
+    if (message.type === 'FINISHED') {
+      const required = ['parent DOM: blocked', 'localStorage: blocked', 'network fetch: blocked', 'other local file: blocked', 'bridge effect: accepted'];
+      const complete = required.every((line) => log.textContent.includes(line)) && state.courage === 1;
+      document.getElementById('isolation-status').textContent = complete
+        ? 'PASS: opaque frame, bridge-only state, DOM/storage/network/local-file probes blocked.'
+        : 'FAIL: one or more isolation or bridge checks did not pass. See the trace.';
+      report('script isolation: ' + (complete ? 'PASS' : 'FAIL'));
+    }
+  });
+
+  const userProgram = `
+    'use strict';
+    const send = (type, fields = {}) => parent.postMessage({ type, token: sessionToken, ...fields }, '*');
+    let sessionToken;
+    let snapshot;
+    window.addEventListener('message', async (event) => {
+      const message = event.data;
+      if (!message || typeof message.type !== 'string') return;
+      if (message.type === 'INIT') {
+        sessionToken = message.token;
+        snapshot = message.snapshot;
+        send('TRACE', { text: 'bridge readState: ' + snapshot.scene + ', courage=' + snapshot.courage });
+        send('READ_STATE');
+        try { void parent.document.title; send('TRACE', { text: 'parent DOM: UNEXPECTED access' }); }
+        catch (error) { send('TRACE', { text: 'parent DOM: blocked (' + error.name + ')' }); }
+        try { void localStorage.length; send('TRACE', { text: 'localStorage: UNEXPECTED access' }); }
+        catch (error) { send('TRACE', { text: 'localStorage: blocked (' + error.name + ')' }); }
+        try { await fetch('https://example.invalid/no-network'); send('TRACE', { text: 'network: UNEXPECTED response' }); }
+        catch (error) { send('TRACE', { text: 'network fetch: blocked (' + error.name + ')' }); }
+        try { await fetch('file:///etc/hosts'); send('TRACE', { text: 'other local file: UNEXPECTED response' }); }
+        catch (error) { send('TRACE', { text: 'other local file: blocked (' + error.name + ')' }); }
+        send('REQUEST_EFFECT', { effect: { type: 'add-courage', amount: 1 } });
+      }
+      if (message.token === sessionToken && message.type === 'STATE_RESULT') {
+        send('TRACE', { text: 'bridge snapshot response: courage=' + message.snapshot.courage });
+      }
+      if (message.token === sessionToken && message.type === 'EFFECT_RESULT') {
+        send('TRACE', { text: 'bridge effect: ' + (message.accepted ? 'accepted' : 'rejected') });
+        document.body.dataset.finished = 'true';
+        parent.postMessage({ type: 'FINISHED', token: sessionToken }, '*');
+      }
+    });
+    window.addEventListener('securitypolicyviolation', (event) => {
+      if (sessionToken) send('TRACE', { text: 'CSP blocked ' + event.violatedDirective + ': ' + event.blockedURI });
+    });
+    window.addEventListener('load', () => send('READY'));
+  `;
+
+  sandbox.srcdoc = '<!doctype html><meta charset="utf-8"><script>' + userProgram + '<\/script>';
+  document.getElementById('light').focus();
+  renderState();
+  report('file URL: ' + location.href);
+  report('document protocol: ' + location.protocol);
+  report('script type: classic inline');
+  </script>
+</body>
+</html>

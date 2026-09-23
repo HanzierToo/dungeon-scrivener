@@ -1,0 +1,10 @@
+{
+  "format": "dungeon-scrivener-save-policy",
+  "schemaVersion": 1,
+  "enabled": true,
+  "slotCount": 2,
+  "allowedLocation": "checkpoint",
+  "checkpointNodeIds": [
+    "old-gate"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "format": "dungeon-scrivener-locale",
+  "schemaVersion": 1,
+  "locale": "en_US",
+  "strings": {
+    "gate-note": "Mind the wet stones."
+  }
+}

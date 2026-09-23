@@ -1,0 +1,19 @@
+{
+  "format": "dungeon-scrivener-content-fingerprint",
+  "schemaVersion": 1,
+  "algorithm": "sha-256",
+  "scope": "playable-files-v1",
+  "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "files": [
+    {
+      "path": "project.json",
+      "byteLength": 128,
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "path": "world.json",
+      "byteLength": 512,
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    }
+  ]
+}

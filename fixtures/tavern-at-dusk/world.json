@@ -1,0 +1,594 @@
+{
+  "format": "dungeon-scrivener-world",
+  "schemaVersion": 1,
+  "entryNodeId": "taproom",
+  "settings": {
+    "time": {
+      "mode": "per-action",
+      "millisecondsPerAction": 120000,
+      "hiddenBehavior": "pause",
+      "maxCatchUpMilliseconds": 0,
+      "showClockHud": true
+    }
+  },
+  "savePolicy": {
+    "enabled": false,
+    "slotCount": 0,
+    "allowedLocation": "anywhere"
+  },
+  "stateDefinitions": [
+    {
+      "key": "trust",
+      "scopeKind": "world",
+      "valueType": "integer",
+      "defaultValue": 0
+    },
+    {
+      "key": "bell-rung",
+      "scopeKind": "world",
+      "valueType": "boolean",
+      "defaultValue": false
+    },
+    {
+      "key": "bell-echoes",
+      "scopeKind": "world",
+      "valueType": "integer",
+      "defaultValue": 0
+    },
+    {
+      "key": "return-visits",
+      "scopeKind": "node",
+      "valueType": "integer",
+      "defaultValue": 0
+    }
+  ],
+  "worldState": {
+    "trust": 0,
+    "bell-rung": false,
+    "bell-echoes": 0
+  },
+  "nodes": [
+    {
+      "id": "tavern-hall",
+      "parentId": null,
+      "visitable": false,
+      "title": {
+        "kind": "locale-key",
+        "key": "root-title"
+      },
+      "content": {
+        "kind": "locale-key",
+        "key": "root-content"
+      },
+      "actions": {
+        "choices": [
+          {
+            "id": "enter-cellar",
+            "label": {
+              "kind": "locale-key",
+              "key": "action-enter-cellar"
+            },
+            "condition": {
+              "kind": "at-node",
+              "nodeId": "taproom"
+            },
+            "effects": [],
+            "navigationEdgeId": "taproom-to-cellar"
+          },
+          {
+            "id": "return-to-taproom",
+            "label": {
+              "kind": "locale-key",
+              "key": "action-return-taproom"
+            },
+            "condition": {
+              "kind": "at-node",
+              "nodeId": "cellar"
+            },
+            "effects": [],
+            "navigationEdgeId": "cellar-to-taproom"
+          },
+          {
+            "id": "wait-for-dusk",
+            "label": {
+              "kind": "locale-key",
+              "key": "action-wait"
+            },
+            "condition": {
+              "kind": "at-node",
+              "nodeId": "taproom"
+            },
+            "effects": []
+          }
+        ],
+        "commands": [
+          {
+            "id": "talk-to-mira",
+            "patterns": [
+              "talk to Mira",
+              "speak with Mira",
+              "speak to Mira"
+            ],
+            "parameters": [],
+            "condition": {
+              "kind": "at-node",
+              "nodeId": "taproom"
+            },
+            "effects": [
+              {
+                "kind": "start-conversation",
+                "conversationId": "mira-story"
+              }
+            ]
+          },
+          {
+            "id": "ask-about-topic",
+            "patterns": [
+              "ask about {topic}",
+              "ask Mira about {topic}"
+            ],
+            "parameters": [
+              {
+                "id": "topic",
+                "valueType": "string"
+              }
+            ],
+            "condition": {
+              "kind": "at-node",
+              "nodeId": "taproom"
+            },
+            "effects": []
+          }
+        ]
+      },
+      "ruleIds": [
+        "clock-rings",
+        "keeper-hears-chime",
+        "room-startles",
+        "count-taproom-returns"
+      ]
+    },
+    {
+      "id": "taproom",
+      "parentId": "tavern-hall",
+      "visitable": true,
+      "title": {
+        "kind": "locale-key",
+        "key": "taproom-title"
+      },
+      "content": {
+        "kind": "locale-key",
+        "key": "taproom-content"
+      },
+      "inheritance": {
+        "defaults": true,
+        "rules": true
+      },
+      "state": {
+        "return-visits": 0
+      }
+    },
+    {
+      "id": "cellar",
+      "parentId": "tavern-hall",
+      "visitable": true,
+      "title": {
+        "kind": "locale-key",
+        "key": "cellar-title"
+      },
+      "content": {
+        "kind": "locale-key",
+        "key": "cellar-content"
+      },
+      "inheritance": {
+        "defaults": true,
+        "rules": true
+      }
+    }
+  ],
+  "navigationEdges": [
+    {
+      "id": "taproom-to-cellar",
+      "fromNodeId": "taproom",
+      "toNodeId": "cellar"
+    },
+    {
+      "id": "cellar-to-taproom",
+      "fromNodeId": "cellar",
+      "toNodeId": "taproom"
+    }
+  ],
+  "entityDefinitions": [
+    {
+      "id": "tavern-character",
+      "name": {
+        "kind": "literal",
+        "text": "Tavern character"
+      },
+      "fields": [
+        {
+          "key": "disposition",
+          "valueType": "string",
+          "defaultValue": "reserved"
+        }
+      ],
+      "allowedTags": [
+        "startled"
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "id": "keeper-mira",
+      "definitionId": "tavern-character",
+      "name": {
+        "kind": "locale-key",
+        "key": "mira-name"
+      },
+      "tags": [],
+      "state": {
+        "disposition": "welcoming"
+      }
+    },
+    {
+      "id": "cellar-rowan",
+      "definitionId": "tavern-character",
+      "name": {
+        "kind": "locale-key",
+        "key": "rowan-name"
+      },
+      "tags": [],
+      "state": {
+        "disposition": "guarded"
+      }
+    }
+  ],
+  "actionDefaults": {
+    "choices": [],
+    "commands": []
+  },
+  "eventDefinitions": [
+    {
+      "id": "midnight-chime",
+      "payloadFields": [
+        {
+          "key": "minute",
+          "valueType": "integer",
+          "defaultValue": 0
+        }
+      ]
+    },
+    {
+      "id": "tavern-stir",
+      "payloadFields": [
+        {
+          "key": "source",
+          "valueType": "string",
+          "defaultValue": "unknown"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "clock-rings",
+      "trigger": {
+        "kind": "phase",
+        "phase": "time-advanced"
+      },
+      "priority": 80,
+      "condition": {
+        "kind": "all",
+        "conditions": [
+          {
+            "kind": "time-at-least",
+            "milliseconds": 120000
+          },
+          {
+            "kind": "compare-state",
+            "left": {
+              "scope": {
+                "kind": "world"
+              },
+              "key": "bell-rung"
+            },
+            "operator": "eq",
+            "right": false
+          }
+        ]
+      },
+      "effects": [
+        {
+          "kind": "set-state",
+          "target": {
+            "scope": {
+              "kind": "world"
+            },
+            "key": "bell-rung"
+          },
+          "value": true
+        },
+        {
+          "kind": "emit-event",
+          "eventId": "midnight-chime",
+          "payload": {
+            "minute": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "keeper-hears-chime",
+      "trigger": {
+        "kind": "event",
+        "eventId": "midnight-chime"
+      },
+      "priority": 60,
+      "effects": [
+        {
+          "kind": "increment-state",
+          "target": {
+            "scope": {
+              "kind": "world"
+            },
+            "key": "trust"
+          },
+          "amount": 1
+        },
+        {
+          "kind": "emit-event",
+          "eventId": "tavern-stir",
+          "payload": {
+            "source": "midnight-chime"
+          }
+        }
+      ]
+    },
+    {
+      "id": "room-startles",
+      "trigger": {
+        "kind": "event",
+        "eventId": "tavern-stir"
+      },
+      "priority": 40,
+      "effects": [
+        {
+          "kind": "add-tag",
+          "entityId": "cellar-rowan",
+          "tag": "startled"
+        },
+        {
+          "kind": "increment-state",
+          "target": {
+            "scope": {
+              "kind": "world"
+            },
+            "key": "bell-echoes"
+          },
+          "amount": 1
+        }
+      ]
+    },
+    {
+      "id": "count-taproom-returns",
+      "trigger": {
+        "kind": "phase",
+        "phase": "node-revisit"
+      },
+      "priority": 50,
+      "condition": {
+        "kind": "at-node",
+        "nodeId": "taproom"
+      },
+      "effects": [
+        {
+          "kind": "increment-state",
+          "target": {
+            "scope": {
+              "kind": "node",
+              "ownerId": "taproom"
+            },
+            "key": "return-visits"
+          },
+          "amount": 1
+        }
+      ]
+    }
+  ],
+  "conversations": [
+    {
+      "id": "mira-story",
+      "participantEntityIds": [
+        "keeper-mira"
+      ],
+      "entryLineId": "mira-first",
+      "interruptible": true,
+      "resumeOnReturn": true,
+      "lines": [
+        {
+          "id": "mira-first",
+          "speakerEntityId": "keeper-mira",
+          "text": {
+            "kind": "locale-key",
+            "key": "mira-first-text"
+          },
+          "options": [
+            {
+              "id": "interrupt-for-rowan",
+              "text": {
+                "kind": "locale-key",
+                "key": "option-interrupt"
+              },
+              "nextLineId": "mira-after-return",
+              "effects": [
+                {
+                  "kind": "interrupt-conversation",
+                  "conversationId": "mira-story"
+                },
+                {
+                  "kind": "start-conversation",
+                  "conversationId": "rowan-story"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "mira-after-return",
+          "speakerEntityId": "keeper-mira",
+          "text": {
+            "kind": "locale-key",
+            "key": "mira-after-return-text"
+          },
+          "options": [
+            {
+              "id": "claim-silver-key",
+              "text": {
+                "kind": "locale-key",
+                "key": "option-claim-key"
+              },
+              "condition": {
+                "kind": "compare-state",
+                "left": {
+                  "scope": {
+                    "kind": "world"
+                  },
+                  "key": "trust"
+                },
+                "operator": "gte",
+                "right": 1
+              },
+              "falsePolicy": "hide",
+              "nextLineId": "mira-farewell",
+              "effects": [
+                {
+                  "kind": "add-item",
+                  "owner": {
+                    "kind": "world"
+                  },
+                  "itemId": "silver-key",
+                  "quantity": 1
+                }
+              ]
+            },
+            {
+              "id": "decline-key",
+              "text": {
+                "kind": "locale-key",
+                "key": "option-decline-key"
+              },
+              "nextLineId": "mira-farewell",
+              "effects": []
+            }
+          ]
+        },
+        {
+          "id": "mira-farewell",
+          "speakerEntityId": "keeper-mira",
+          "text": {
+            "kind": "locale-key",
+            "key": "mira-farewell-text"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rowan-story",
+      "participantEntityIds": [
+        "cellar-rowan"
+      ],
+      "entryLineId": "rowan-first",
+      "interruptible": true,
+      "resumeOnReturn": true,
+      "lines": [
+        {
+          "id": "rowan-first",
+          "speakerEntityId": "cellar-rowan",
+          "text": {
+            "kind": "locale-key",
+            "key": "rowan-first-text"
+          },
+          "options": [
+            {
+              "id": "tell-secret",
+              "text": {
+                "kind": "locale-key",
+                "key": "option-tell-secret"
+              },
+              "condition": {
+                "kind": "compare-state",
+                "left": {
+                  "scope": {
+                    "kind": "world"
+                  },
+                  "key": "trust"
+                },
+                "operator": "gte",
+                "right": 1
+              },
+              "falsePolicy": "hide",
+              "nextLineId": "rowan-secret",
+              "effects": []
+            }
+          ]
+        },
+        {
+          "id": "rowan-secret",
+          "speakerEntityId": "cellar-rowan",
+          "text": {
+            "kind": "locale-key",
+            "key": "rowan-secret-text"
+          },
+          "options": [
+            {
+              "id": "return-to-mira",
+              "text": {
+                "kind": "locale-key",
+                "key": "option-return-mira"
+              },
+              "effects": [
+                {
+                  "kind": "resume-conversation",
+                  "conversationId": "mira-story"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "itemDefinitions": [
+    {
+      "id": "silver-key",
+      "name": {
+        "kind": "locale-key",
+        "key": "silver-key-name"
+      },
+      "stackLimit": 1,
+      "canContain": false,
+      "fields": []
+    }
+  ],
+  "initialInventory": [],
+  "scripts": [
+    {
+      "id": "keeper-check",
+      "path": "scripts/keeper.js",
+      "language": "javascript",
+      "entrypoint": "main"
+    },
+    {
+      "id": "echo-check",
+      "path": "scripts/echo.lua",
+      "language": "lua",
+      "entrypoint": "main"
+    },
+    {
+      "id": "witness-check",
+      "path": "scripts/witness.py",
+      "language": "python",
+      "entrypoint": "main"
+    }
+  ]
+}

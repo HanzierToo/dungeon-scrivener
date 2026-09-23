@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:diagnostics",
+  "title": "DungeonScrivener diagnostic report v1",
+  "type": "object",
+  "properties": {
+    "format": { "const": "dungeon-scrivener-diagnostics" },
+    "schemaVersion": { "const": 1 },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string", "pattern": "^DS-[A-Z]{2,8}-[0-9]{3,5}$" },
+          "severity": { "enum": ["info", "warning", "error", "fatal"] },
+          "message": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "path": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/path" },
+          "entityId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+          "sourceSpan": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/sourceSpan" },
+          "suggestedFix": { "type": "string", "maxLength": 2048 },
+          "blocks": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "enum": ["play", "export", "script-execution"] }
+          },
+          "acknowledgementRequired": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "enum": ["save-project", "play", "export"] }
+          }
+        },
+        "required": ["code", "severity", "message"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["format", "schemaVersion", "diagnostics"],
+  "additionalProperties": false
+}

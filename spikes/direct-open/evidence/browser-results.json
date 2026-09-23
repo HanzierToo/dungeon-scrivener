@@ -1,0 +1,131 @@
+[
+  {
+    "browser": "chromium",
+    "result": "PASS",
+    "directFileOpen": "file:",
+    "storyAndActions": "PASS",
+    "localMedia": "PASS: local PNG and WAV loaded.",
+    "saveZipDownload": "dungeon-scrivener-save.zip (266 bytes)",
+    "saveZipImport": "PASS, restored state {\"courage\":\"2\",\"chaptersSeen\":\"2\"}",
+    "scriptIsolation": "PASS: opaque frame, bridge-only state, DOM/storage/network/local-file probes blocked.",
+    "bridgeTrace": [
+      "sandbox origin: \"null\" (opaque)",
+      "bridge readState: old-gate, courage=0",
+      "parent DOM: blocked (SecurityError)",
+      "localStorage: blocked (SecurityError)",
+      "network fetch: blocked (TypeError)",
+      "other local file: blocked (TypeError)",
+      "CSP blocked connect-src: https://example.invalid/no-network",
+      "CSP blocked connect-src: file",
+      "bridge snapshot response: courage=0",
+      "bridge effect: accepted"
+    ],
+    "topLevelScripts": [
+      {
+        "type": "classic",
+        "src": ""
+      }
+    ],
+    "networkRequests": [
+      {
+        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/index.html",
+        "resourceType": "document"
+      },
+      {
+        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/assets/lantern-map.png",
+        "resourceType": "image"
+      },
+      {
+        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/assets/night-birds.wav",
+        "resourceType": "media"
+      }
+    ],
+    "failedRequests": [],
+    "consoleMessages": [
+      {
+        "type": "error",
+        "text": "Connecting to 'https://example.invalid/no-network' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked."
+      },
+      {
+        "type": "error",
+        "text": "Fetch API cannot load https://example.invalid/no-network. Refused to connect because it violates the document's Content Security Policy."
+      },
+      {
+        "type": "error",
+        "text": "Connecting to 'file:///etc/hosts' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked."
+      },
+      {
+        "type": "error",
+        "text": "Fetch API cannot load file:///etc/hosts. Refused to connect because it violates the document's Content Security Policy."
+      }
+    ],
+    "pageErrors": [],
+    "version": "153.0.8010.12"
+  },
+  {
+    "browser": "firefox",
+    "result": "PASS",
+    "directFileOpen": "file:",
+    "storyAndActions": "PASS",
+    "localMedia": "PASS: local PNG and WAV loaded.",
+    "saveZipDownload": "dungeon-scrivener-save.zip (266 bytes)",
+    "saveZipImport": "PASS, restored state {\"courage\":\"2\",\"chaptersSeen\":\"2\"}",
+    "scriptIsolation": "PASS: opaque frame, bridge-only state, DOM/storage/network/local-file probes blocked.",
+    "bridgeTrace": [
+      "sandbox origin: \"null\" (opaque)",
+      "bridge readState: old-gate, courage=0",
+      "parent DOM: blocked (SecurityError)",
+      "localStorage: blocked (SecurityError)",
+      "network fetch: blocked (TypeError)",
+      "other local file: blocked (TypeError)",
+      "CSP blocked connect-src: https://example.invalid/no-network",
+      "bridge snapshot response: courage=0",
+      "bridge effect: accepted"
+    ],
+    "topLevelScripts": [
+      {
+        "type": "classic",
+        "src": ""
+      }
+    ],
+    "networkRequests": [],
+    "failedRequests": [],
+    "consoleMessages": [
+      {
+        "type": "error",
+        "text": "[JavaScript Error: \"Security Error: Content at moz-nullprincipal:{6c285b6f-732d-4715-839d-9f8c7a92df9b}?file://UNIVERSAL_FILE_URI_ORIGIN may not load or link to file:///etc/hosts.\"]"
+      },
+      {
+        "type": "error",
+        "text": "[JavaScript Error: \"Content-Security-Policy: The page’s settings blocked the loading of a resource (connect-src) at https://example.invalid/no-network because it violates the following directive: “connect-src 'none'”\" {file: \"about:srcdoc\" line: 18}]"
+      }
+    ],
+    "pageErrors": [],
+    "version": "155.0"
+  },
+  {
+    "browser": "webkit",
+    "result": "FAIL",
+    "error": "page.goto: WebKit encountered an internal error\nCall log:\n\u001b[2m  - navigating to \"file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/index.html\", waiting until \"load\"\u001b[22m\n\n    at /Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/verify.mjs:37:16",
+    "networkRequests": [
+      {
+        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/index.html",
+        "resourceType": "document"
+      }
+    ],
+    "failedRequests": [
+      {
+        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/index.html",
+        "failure": "WebKit encountered an internal error"
+      }
+    ],
+    "consoleMessages": [
+      {
+        "type": "error",
+        "text": "Failed to load resource: WebKit encountered an internal error"
+      }
+    ],
+    "pageErrors": [],
+    "version": "26.6"
+  }
+]

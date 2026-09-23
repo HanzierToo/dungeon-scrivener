@@ -1,0 +1,13 @@
+{
+  "name": "dungeon-scrivener-direct-open-spike",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build:zip": "python3 scripts/create-assets.py && node scripts/build-demo-zip.mjs && python3 scripts/check-demo-zip.py",
+    "verify": "node verify.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

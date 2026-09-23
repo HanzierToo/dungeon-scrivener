@@ -1,0 +1,29 @@
+{
+  "format": "dungeon-scrivener-locale",
+  "schemaVersion": 1,
+  "locale": "ja-JP",
+  "strings": {
+    "root-title": "夕暮れの酒場",
+    "root-content": "低い屋根に雨がたまる。部屋には使い込まれた帳簿と、頑固な時計がひとつある。",
+    "taproom-title": "酒場の広間",
+    "taproom-content": "雨が鎧戸をたたく。ランプのそばの地図には地下室への階段が記されている。\n\n![[asset:sha256:db74122853c858b16bcc3b58363d3bdd89c38f9f720240626458f13c21219399|酒場の路地の小さな地図]]\n\n![[asset:sha256:dadc41ce60b07eb817ef2b92628e664126cd877fcfb0628278e89bd7f9acb690|鎧戸の向こうの夜鳥]]\n\n地下室への扉は[[node:cellar|地下室]]へ続く。夜が来る前に、灯りをつけて。",
+    "cellar-title": "地下室",
+    "cellar-content": "ローワンはここに乾物を保管し、頭上の天気に耳を澄ませる。",
+    "action-enter-cellar": "地下室へ降りる",
+    "action-return-taproom": "酒場の広間へ戻る",
+    "action-wait": "一分待つ",
+    "mira-name": "ミラ",
+    "rowan-name": "ローワン",
+    "mira-first-text": "ミラは声をひそめる。「古い道が水に沈んでから、ランタンの音が狂ったままなの。」",
+    "rowan-first-text": "ローワンは棚のそばで立ち止まる。「あなたにも聞こえたのか？」",
+    "rowan-secret-text": "ローワンは身を寄せる。「あの鐘は、上の道がまた安全になった合図だ。」",
+    "mira-after-return-text": "ミラは小さくうなずく。「戻ってきたのね。手を貸すつもりなら、これを持っていって。」",
+    "mira-farewell-text": "雨が弱まるなか、ミラは帳簿に戻る。",
+    "option-interrupt": "ローワンに鐘の意味を尋ねる",
+    "option-tell-secret": "知っていることを話して",
+    "option-return-mira": "ミラのところへ戻る",
+    "option-claim-key": "銀の鍵を受け取る",
+    "option-decline-key": "今は鍵を置いておく",
+    "silver-key-name": "銀の鍵"
+  }
+}

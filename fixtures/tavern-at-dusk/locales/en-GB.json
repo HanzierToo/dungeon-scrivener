@@ -1,0 +1,29 @@
+{
+  "format": "dungeon-scrivener-locale",
+  "schemaVersion": 1,
+  "locale": "en-GB",
+  "strings": {
+    "root-title": "Tavern at Dusk",
+    "root-content": "A low roof gathers the rain. Its rooms share one battered ledger and a stubborn clock.",
+    "taproom-title": "The Taproom",
+    "taproom-content": "Rain ticks against the shutters. The map beside the lamp marks a stair down to the cellar.\n\n![[asset:sha256:db74122853c858b16bcc3b58363d3bdd89c38f9f720240626458f13c21219399|A small map of the tavern lane]]\n\n![[asset:sha256:dadc41ce60b07eb817ef2b92628e664126cd877fcfb0628278e89bd7f9acb690|Night birds beyond the shutters]]\n\nThe cellar door leads to [[node:cellar|the cellar]]. 夜が来る前に、灯りをつけて。",
+    "cellar-title": "The Cellar",
+    "cellar-content": "Rowan keeps the dry stores here and listens to the weather above.",
+    "action-enter-cellar": "Go down to the cellar",
+    "action-return-taproom": "Return to the taproom",
+    "action-wait": "Wait for a minute",
+    "mira-name": "Mira",
+    "rowan-name": "Rowan",
+    "mira-first-text": "Mira lowers her voice. “The lantern has not rung true since the old road flooded.”",
+    "rowan-first-text": "Rowan pauses by the shelves. “You heard it too?”",
+    "rowan-secret-text": "Rowan leans closer. “The chime means the upper road is safe again.”",
+    "mira-after-return-text": "Mira gives you a small nod. “You came back. Take this, if you mean to help.”",
+    "mira-farewell-text": "Mira returns to the ledger as the rain softens.",
+    "option-interrupt": "Ask Rowan what the chime means",
+    "option-tell-secret": "Tell me what you know",
+    "option-return-mira": "Go back to Mira",
+    "option-claim-key": "Take the silver key",
+    "option-decline-key": "Leave the key for now",
+    "silver-key-name": "Silver key"
+  }
+}

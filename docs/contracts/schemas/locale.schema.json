@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:locale",
+  "title": "DungeonScrivener locale document v1",
+  "type": "object",
+  "properties": {
+    "format": { "const": "dungeon-scrivener-locale" },
+    "schemaVersion": { "const": 1 },
+    "locale": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/locale" },
+    "strings": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "required": ["format", "schemaVersion", "locale", "strings"],
+  "additionalProperties": false
+}

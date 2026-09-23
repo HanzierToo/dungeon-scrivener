@@ -1,0 +1,24 @@
+{
+  "format": "dungeon-scrivener-project-vfs-index",
+  "schemaVersion": 1,
+  "projectId": "tavern-at-dusk",
+  "directories": [
+    "assets/sha256"
+  ],
+  "files": [
+    {
+      "path": "project.json",
+      "byteLength": 128,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "role": "unknown",
+      "mediaType": "application/json"
+    },
+    {
+      "path": "world.json",
+      "byteLength": 512,
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "role": "world",
+      "mediaType": "application/json"
+    }
+  ]
+}

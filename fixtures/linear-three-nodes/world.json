@@ -1,0 +1,132 @@
+{
+  "format": "dungeon-scrivener-world",
+  "schemaVersion": 1,
+  "entryNodeId": "old-gate",
+  "settings": {
+    "time": {
+      "mode": "per-action",
+      "millisecondsPerAction": 1000,
+      "hiddenBehavior": "pause",
+      "maxCatchUpMilliseconds": 0,
+      "showClockHud": true
+    }
+  },
+  "savePolicy": {
+    "enabled": false,
+    "slotCount": 0,
+    "allowedLocation": "anywhere"
+  },
+  "stateDefinitions": [
+    {
+      "key": "lantern-lit",
+      "scopeKind": "world",
+      "valueType": "boolean",
+      "defaultValue": false
+    }
+  ],
+  "worldState": {
+    "lantern-lit": false
+  },
+  "nodes": [
+    {
+      "id": "old-gate",
+      "parentId": null,
+      "visitable": true,
+      "title": {
+        "kind": "locale-key",
+        "key": "gate-title"
+      },
+      "content": {
+        "kind": "locale-key",
+        "key": "gate-content"
+      },
+      "actions": {
+        "choices": [
+          {
+            "id": "open-gate",
+            "label": {
+              "kind": "locale-key",
+              "key": "open-gate-label"
+            },
+            "effects": [
+              {
+                "kind": "set-state",
+                "target": {
+                  "scope": {
+                    "kind": "world"
+                  },
+                  "key": "lantern-lit"
+                },
+                "value": true
+              }
+            ],
+            "navigationEdgeId": "gate-to-bridge"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stone-bridge",
+      "parentId": null,
+      "visitable": true,
+      "title": {
+        "kind": "locale-key",
+        "key": "bridge-title"
+      },
+      "content": {
+        "kind": "locale-key",
+        "key": "bridge-content"
+      },
+      "actions": {
+        "choices": [
+          {
+            "id": "cross-bridge",
+            "label": {
+              "kind": "locale-key",
+              "key": "cross-bridge-label"
+            },
+            "effects": [],
+            "navigationEdgeId": "bridge-to-home"
+          }
+        ]
+      }
+    },
+    {
+      "id": "lantern-house",
+      "parentId": null,
+      "visitable": true,
+      "title": {
+        "kind": "locale-key",
+        "key": "ending-title"
+      },
+      "content": {
+        "kind": "locale-key",
+        "key": "ending-content"
+      }
+    }
+  ],
+  "navigationEdges": [
+    {
+      "id": "gate-to-bridge",
+      "fromNodeId": "old-gate",
+      "toNodeId": "stone-bridge"
+    },
+    {
+      "id": "bridge-to-home",
+      "fromNodeId": "stone-bridge",
+      "toNodeId": "lantern-house"
+    }
+  ],
+  "entityDefinitions": [],
+  "entities": [],
+  "actionDefaults": {
+    "choices": [],
+    "commands": []
+  },
+  "eventDefinitions": [],
+  "rules": [],
+  "conversations": [],
+  "itemDefinitions": [],
+  "initialInventory": [],
+  "scripts": []
+}

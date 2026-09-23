@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:project-archive-index",
+  "title": "DungeonScrivener project ZIP archive index v1",
+  "description": "Validated metadata for a ZIP project archive. This index is an API value and is not an extra file inside the ZIP.",
+  "type": "object",
+  "properties": {
+    "format": { "const": "dungeon-scrivener-project-archive-index" },
+    "schemaVersion": { "const": 1 },
+    "archiveVersion": { "const": 1 },
+    "entries": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": { "const": "file" },
+              "compression": { "enum": ["store", "deflate"] },
+              "path": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/path" },
+              "compressedSize": { "type": "integer", "minimum": 0 },
+              "uncompressedSize": { "type": "integer", "minimum": 0 },
+              "crc32": { "type": "string", "pattern": "^[a-f0-9]{8}$" },
+              "sha256": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/sha256" }
+            },
+            "required": ["kind", "compression", "path", "compressedSize", "uncompressedSize", "crc32", "sha256"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": { "const": "directory" },
+              "path": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/path" }
+            },
+            "required": ["kind", "path"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "required": ["format", "schemaVersion", "archiveVersion", "entries"],
+  "additionalProperties": false
+}

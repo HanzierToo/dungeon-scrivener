@@ -1,0 +1,623 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:player-view",
+  "title": "DungeonScrivener player view v1",
+  "type": "object",
+  "$defs": {
+    "inline": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "node-link"
+            },
+            "nodeId": {
+              "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "nodeId",
+            "label"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "external-link"
+            },
+            "href": {
+              "type": "string",
+              "pattern": "^(https://|mailto:)"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "href",
+            "label"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "asset"
+            },
+            "assetId": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "mediaType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "alt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "assetId",
+            "mediaType",
+            "alt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "emphasis"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/inline"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "strong"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/inline"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "code"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "block": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "paragraph"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/inline"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "heading"
+            },
+            "level": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/inline"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "level",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "list"
+            },
+            "ordered": {
+              "type": "boolean"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/block"
+                }
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "ordered",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "callout"
+            },
+            "tone": {
+              "enum": [
+                "note",
+                "tip",
+                "important",
+                "warning",
+                "caution"
+              ]
+            },
+            "blocks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/block"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "tone",
+            "blocks"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "node-embed"
+            },
+            "nodeId": {
+              "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+            },
+            "blocks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/block"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "nodeId",
+            "blocks"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "blockquote"
+            },
+            "blocks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/block"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "blocks"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "code-block"
+            },
+            "text": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "thematic-break"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "table"
+            },
+            "header": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/inline"
+                }
+              }
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/inline"
+                  }
+                }
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "header",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "diagnostic": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^DS-[A-Z]{2,8}-[0-9]{3,5}$"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error",
+            "fatal"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "choiceView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+        },
+        "label": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "disabledReason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "enabled"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "format": {
+      "const": "dungeon-scrivener-player-view"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "projectId": {
+      "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+    },
+    "locale": {
+      "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/locale"
+    },
+    "gameTitle": {
+      "type": "string"
+    },
+    "currentNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/block"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "blocks"
+      ],
+      "additionalProperties": false
+    },
+    "choices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+          },
+          "label": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "disabledReason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "enabled"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+          },
+          "patterns": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "urn:dungeon-scrivener:schema:v1:world#/$defs/commandParameter"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "disabledReason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "patterns",
+          "parameters",
+          "enabled"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "dialogue": {
+      "type": "object",
+      "properties": {
+        "conversationId": {
+          "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+        },
+        "lineId": {
+          "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+        },
+        "speakerEntityId": {
+          "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+        },
+        "speakerName": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/choiceView"
+          }
+        },
+        "canResume": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "conversationId",
+        "lineId",
+        "speakerEntityId",
+        "speakerName",
+        "text",
+        "options",
+        "canResume"
+      ],
+      "additionalProperties": false
+    },
+    "inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+          },
+          "label": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "containerItemId": {
+            "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+          },
+          "equipmentSlot": {
+            "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+          },
+          "fields": {
+            "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars"
+          }
+        },
+        "required": [
+          "itemId",
+          "label",
+          "quantity",
+          "fields"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "clock": {
+      "type": "object",
+      "properties": {
+        "gameTimeMilliseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "display": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "gameTimeMilliseconds",
+        "display"
+      ],
+      "additionalProperties": false
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    }
+  },
+  "required": [
+    "format",
+    "schemaVersion",
+    "projectId",
+    "locale",
+    "gameTitle",
+    "currentNode",
+    "choices",
+    "commands",
+    "diagnostics"
+  ],
+  "additionalProperties": false
+}

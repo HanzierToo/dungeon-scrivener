@@ -1,0 +1,39 @@
+{
+  "name": "dungeon-scrivener",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.17.0",
+  "engines": {
+    "node": ">=22.12.0 <25",
+    "npm": ">=10"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check:contracts": "node docs/contracts/scripts/validate-examples.mjs",
+    "typecheck": "tsc --project packages/model/tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test --pass-with-no-tests",
+    "check": "npm run check:contracts && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@lezer/python": "1.1.19",
+    "acorn": "8.18.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "dompurify": "3.4.15",
+    "fflate": "0.8.3",
+    "luaparse": "0.3.1",
+    "markdown-it": "15.0.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/luaparse": "0.2.13",
+    "@types/node": "24.13.6",
+    "typescript": "7.0.2",
+    "vite": "8.3.0",
+    "vitest": "5.0.1"
+  }
+}

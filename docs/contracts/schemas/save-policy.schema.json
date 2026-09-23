@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:save-policy",
+  "title": "DungeonScrivener player save-slot policy v1",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "dungeon-scrivener-save-policy"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "slotCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "allowedLocation": {
+      "enum": [
+        "anywhere",
+        "checkpoint"
+      ]
+    },
+    "checkpointNodeIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+      }
+    }
+  },
+  "required": [
+    "format",
+    "schemaVersion",
+    "enabled",
+    "slotCount",
+    "allowedLocation"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "slotCount": {
+            "const": 0
+          },
+          "checkpointNodeIds": {
+            "maxItems": 0,
+            "type": "array"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "slotCount": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "allowedLocation": {
+            "const": "checkpoint"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "checkpointNodeIds"
+        ],
+        "properties": {
+          "checkpointNodeIds": {
+            "minItems": 1,
+            "type": "array"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "checkpointNodeIds": {
+            "maxItems": 0,
+            "type": "array"
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

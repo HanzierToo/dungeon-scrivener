@@ -1,0 +1,20 @@
+{
+  "format": "dungeon-scrivener-project-archive-index",
+  "schemaVersion": 1,
+  "archiveVersion": 1,
+  "entries": [
+    {
+      "kind": "directory",
+      "path": "assets"
+    },
+    {
+      "kind": "file",
+      "compression": "gzip",
+      "path": "project.json",
+      "compressedSize": 70,
+      "uncompressedSize": 128,
+      "crc32": "a1b2c3d4",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ]
+}
