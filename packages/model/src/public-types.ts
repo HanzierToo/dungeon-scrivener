@@ -23,6 +23,7 @@ export type Scalar = string | number | boolean;
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonRecord = Readonly<Record<string, JsonValue>>;
 export type ScalarRecord = Readonly<Record<string, Scalar>>;
+export type GameVersion = string;
 
 export interface ProjectManifest {
   readonly format: 'dungeon-scrivener-project';
@@ -30,6 +31,8 @@ export interface ProjectManifest {
   readonly projectId: ProjectId;
   readonly title: string;
   readonly defaultLocale: LocaleTag;
+  /** Authoritative content compatibility version copied into player saves. */
+  readonly gameVersion: GameVersion;
 }
 
 export interface LocaleDocument {
@@ -85,7 +88,11 @@ export type Effect =
   | { readonly kind: 'emit-event'; readonly eventId: EventId; readonly payload: JsonRecord }
   | { readonly kind: 'navigate'; readonly edgeId: StableId }
   | { readonly kind: 'add-item' | 'remove-item'; readonly owner: StateScope; readonly itemId: ItemId; readonly quantity: number }
-  | { readonly kind: 'start-conversation' | 'interrupt-conversation' | 'resume-conversation'; readonly conversationId: ConversationId };
+  | { readonly kind: 'start-conversation' | 'interrupt-conversation' | 'resume-conversation'; readonly conversationId: ConversationId }
+  | { readonly kind: 'run-script'; readonly scriptId: ScriptId };
+
+/** Effects available to script capabilities. Scripts cannot request a new script activation. */
+export type ScriptEffect = Exclude<Effect, { readonly kind: 'run-script' }>;
 
 export interface EventOccurrence {
   readonly eventId: EventId;
@@ -245,6 +252,31 @@ export interface TimeSettings {
   readonly showClockHud: boolean;
 }
 
+export type RandomnessMode = 'seeded' | 'unseeded';
+
+export interface RandomnessSettings {
+  readonly mode: RandomnessMode;
+}
+
+export type TypingSoundTarget =
+  | { readonly kind: 'key'; readonly code: string }
+  | { readonly kind: 'group'; readonly group: 'letters' | 'digits' | 'space' | 'punctuation' | 'editing' | 'other' };
+
+export interface TypingSoundMapping {
+  readonly target: TypingSoundTarget;
+  readonly assetHash: Sha256Hex;
+  readonly volume: number;
+}
+
+export type TypingSoundFallback =
+  | { readonly kind: 'silent' }
+  | { readonly kind: 'asset'; readonly assetHash: Sha256Hex; readonly volume: number };
+
+export interface TypingSounds {
+  readonly mappings: readonly TypingSoundMapping[];
+  readonly fallback: TypingSoundFallback;
+}
+
 export interface SaveSlotPolicy {
   readonly enabled: boolean;
   readonly slotCount: number;
@@ -254,6 +286,8 @@ export interface SaveSlotPolicy {
 
 export interface WorldSettings {
   readonly time: TimeSettings;
+  readonly randomness: RandomnessSettings;
+  readonly typingSounds?: TypingSounds;
   readonly playerStylePath?: VfsPath;
 }
 
@@ -487,6 +521,20 @@ export interface RandomOutcome {
   readonly value: number;
 }
 
+/** Only nondeterministic draws are persisted; seeded draws replay from randomSeed. */
+export type UnseededRandomOutcome = Omit<RandomOutcome, 'provider'> & { readonly provider: 'unseeded' };
+
+export type PageVisibility = 'visible' | 'hidden';
+
+export interface ClockState {
+  readonly visibility: PageVisibility;
+  readonly focused: boolean;
+  /** Host-supplied wall-clock baseline. Null for per-action time worlds. */
+  readonly lastObservedEpochMilliseconds: number | null;
+  /** Start of the current hidden-or-unfocused interval; null while active. */
+  readonly inactiveSinceEpochMilliseconds: number | null;
+}
+
 export interface SavedConversationContext {
   readonly conversationId: ConversationId;
   readonly lineId: DialogueLineId;
@@ -504,8 +552,12 @@ export interface SavedSessionState {
   readonly nodeVisitCounts: Readonly<Record<NodeId, number>>;
   readonly conversationStack: readonly SavedConversationContext[];
   readonly gameTimeMilliseconds: number;
+  readonly randomnessMode: RandomnessMode;
   readonly randomSeed: number | null;
-  readonly randomOutcomes: readonly RandomOutcome[];
+  readonly randomOutcomes: readonly UnseededRandomOutcome[];
+  /** Mutable tags, including authored initial tags plus accepted tag effects. */
+  readonly entityTags: Readonly<Record<EntityId, readonly string[]>>;
+  readonly clockState: ClockState;
   readonly ruleGuards: Readonly<Record<RuleId, boolean>>;
   readonly inventory: readonly InventoryStack[];
 }
@@ -514,7 +566,7 @@ export interface PlayerSaveArchive {
   readonly format: 'dungeon-scrivener-player-save';
   readonly schemaVersion: SchemaVersion;
   readonly projectId: ProjectId;
-  readonly gameVersion: string;
+  readonly gameVersion: GameVersion;
   readonly engineVersion: string;
   readonly contentFingerprint: ContentDigest;
   readonly slotId: StableId;
@@ -531,10 +583,54 @@ export interface ArchiveLimits {
   readonly maxPathBytes: number;
 }
 
-export interface ActionInput {
-  readonly kind: 'choice' | 'command';
-  readonly actionId: StableId;
-  readonly parameters?: Readonly<Record<string, Scalar>>;
+/** Resolved action input. Player text enters through PlayerInput instead. */
+export type ActionInput =
+  | { readonly kind: 'choice'; readonly actionId: ChoiceId }
+  | { readonly kind: 'command'; readonly actionId: CommandId; readonly parameters: Readonly<Record<string, Scalar>> };
+
+export type PlayerInput =
+  | { readonly kind: 'choice'; readonly actionId: ChoiceId }
+  | { readonly kind: 'command-text'; readonly rawText: string };
+
+export type CommandMatchResult =
+  | {
+      readonly kind: 'matched';
+      readonly action: Extract<ActionInput, { readonly kind: 'command' }>;
+      readonly normalizedText: string;
+    }
+  | { readonly kind: 'no-match'; readonly normalizedText: string }
+  | { readonly kind: 'ambiguous'; readonly commandIds: readonly CommandId[]; readonly normalizedText: string };
+
+export type PlayerInputResolution =
+  | { readonly kind: 'choice'; readonly actionId: ChoiceId }
+  | { readonly kind: 'command'; readonly action: Extract<ActionInput, { readonly kind: 'command' }>; readonly normalizedText: string }
+  | { readonly kind: 'no-match'; readonly normalizedText: string }
+  | { readonly kind: 'ambiguous'; readonly commandIds: readonly CommandId[]; readonly normalizedText: string }
+  | { readonly kind: 'disabled'; readonly actionId: StableId; readonly reason: string };
+
+export interface SessionStartOptions {
+  /** Required iff world.settings.randomness.mode is seeded. Must be uint32. */
+  readonly randomSeed?: number;
+  readonly wallClockEpochMilliseconds: number;
+  readonly visibility: PageVisibility;
+  readonly focused: boolean;
+}
+
+export interface ClockInput {
+  readonly kind: 'tick' | 'visibility-change' | 'focus-change' | 'resume';
+  readonly wallClockEpochMilliseconds: number;
+  readonly visibility: PageVisibility;
+  readonly focused: boolean;
+}
+
+export interface RandomEntropySource {
+  /** Supplies one uniformly distributed uint32 value from the host entropy source. */
+  nextUint32(): number;
+}
+
+export interface GameEngineHost {
+  /** Required host source; seeded worlds do not consume it. */
+  readonly unseededRandomSource: RandomEntropySource;
 }
 
 export interface SessionSnapshot extends SavedSessionState {
@@ -580,6 +676,10 @@ export interface TransitionResult {
   readonly diagnostics: DiagnosticReport;
 }
 
+export interface PlayerInputTransitionResult extends TransitionResult {
+  readonly resolution: PlayerInputResolution;
+}
+
 export interface ContentFingerprintResult {
   readonly ok: true;
   readonly value: ContentFingerprint;
@@ -613,7 +713,11 @@ export interface ProjectVfsApi {
 }
 
 export interface GameEngineApi {
-  createSession(projectId: ProjectId, world: WorldDocument, seed: number | null): SessionSnapshot;
+  createSession(projectId: ProjectId, world: WorldDocument, options: SessionStartOptions): SessionSnapshot;
+  matchCommandText(world: WorldDocument, snapshot: SessionSnapshot, rawText: string): CommandMatchResult;
+  dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnapshot, input: PlayerInput): PlayerInputTransitionResult;
+  observeClock(world: WorldDocument, snapshot: SessionSnapshot, input: ClockInput): TransitionResult;
+  /** Engine-level dispatch for already-resolved choices and command captures. */
   dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, input: ActionInput): TransitionResult;
   getPlayerView(
     manifest: ProjectManifest,
@@ -624,13 +728,16 @@ export interface GameEngineApi {
   ): PlayerView;
 }
 
+export interface GameEngineFactoryApi {
+  createGameEngine(host: GameEngineHost): GameEngineApi;
+}
+
 export interface ScriptCompilerApi {
   compileScript(source: string, reference: ScriptSourceReference): ScriptIR | DiagnosticReport;
 }
 
 export interface SaveCompatibilityTarget {
-  readonly projectId: ProjectId;
-  readonly gameVersion: string;
+  readonly manifest: Pick<ProjectManifest, 'projectId' | 'gameVersion'>;
   readonly engineVersion: string;
   readonly contentFingerprint: ContentDigest;
 }

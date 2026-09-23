@@ -9,6 +9,9 @@
       "hiddenBehavior": "pause",
       "maxCatchUpMilliseconds": 0,
       "showClockHud": true
+    },
+    "randomness": {
+      "mode": "seeded"
     }
   },
   "savePolicy": {

@@ -4,11 +4,28 @@
   "entryNodeId": "taproom",
   "settings": {
     "time": {
-      "mode": "per-action",
-      "millisecondsPerAction": 120000,
-      "hiddenBehavior": "pause",
-      "maxCatchUpMilliseconds": 0,
+      "mode": "elapsed",
+      "hiddenBehavior": "bounded-catch-up",
+      "maxCatchUpMilliseconds": 60000,
       "showClockHud": true
+    },
+    "randomness": {
+      "mode": "unseeded"
+    },
+    "typingSounds": {
+      "mappings": [
+        {
+          "target": {
+            "kind": "group",
+            "group": "letters"
+          },
+          "assetHash": "dadc41ce60b07eb817ef2b92628e664126cd877fcfb0628278e89bd7f9acb690",
+          "volume": 0.25
+        }
+      ],
+      "fallback": {
+        "kind": "silent"
+      }
     }
   },
   "savePolicy": {
@@ -133,6 +150,35 @@
                 "valueType": "string"
               }
             ],
+            "condition": {
+              "kind": "at-node",
+              "nodeId": "taproom"
+            },
+            "effects": []
+          },
+          {
+            "id": "count-candles",
+            "patterns": [
+              "count candles {count}"
+            ],
+            "parameters": [
+              {
+                "id": "count",
+                "valueType": "integer"
+              }
+            ],
+            "condition": {
+              "kind": "at-node",
+              "nodeId": "taproom"
+            },
+            "effects": []
+          },
+          {
+            "id": "count-candles-two",
+            "patterns": [
+              "count candles 2"
+            ],
+            "parameters": [],
             "condition": {
               "kind": "at-node",
               "nodeId": "taproom"
@@ -309,11 +355,8 @@
           "value": true
         },
         {
-          "kind": "emit-event",
-          "eventId": "midnight-chime",
-          "payload": {
-            "minute": 2
-          }
+          "kind": "run-script",
+          "scriptId": "echo-check"
         }
       ]
     },
@@ -326,21 +369,8 @@
       "priority": 60,
       "effects": [
         {
-          "kind": "increment-state",
-          "target": {
-            "scope": {
-              "kind": "world"
-            },
-            "key": "trust"
-          },
-          "amount": 1
-        },
-        {
-          "kind": "emit-event",
-          "eventId": "tavern-stir",
-          "payload": {
-            "source": "midnight-chime"
-          }
+          "kind": "run-script",
+          "scriptId": "keeper-check"
         }
       ]
     },
@@ -353,19 +383,8 @@
       "priority": 40,
       "effects": [
         {
-          "kind": "add-tag",
-          "entityId": "cellar-rowan",
-          "tag": "startled"
-        },
-        {
-          "kind": "increment-state",
-          "target": {
-            "scope": {
-              "kind": "world"
-            },
-            "key": "bell-echoes"
-          },
-          "amount": 1
+          "kind": "run-script",
+          "scriptId": "witness-check"
         }
       ]
     },

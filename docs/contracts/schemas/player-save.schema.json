@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:player-save",
+  "title": "DungeonScrivener portable player save v1",
+  "type": "object",
+  "$defs": {
+    "conversationContext": {
+      "type": "object",
+      "properties": {
+        "conversationId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "lineId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "returnNodeId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "historyLineIds": { "type": "array", "items": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" } }
+      },
+      "required": ["conversationId", "lineId", "returnNodeId", "historyLineIds"],
+      "additionalProperties": false
+    },
+    "inventoryStack": {
+      "type": "object",
+      "properties": {
+        "owner": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/stateScope" },
+        "itemId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "quantity": { "type": "integer", "minimum": 1 },
+        "containerItemId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "equippedSlot": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "fields": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars" }
+      },
+      "required": ["owner", "itemId", "quantity", "fields"],
+      "additionalProperties": false
+    },
+    "randomOutcome": {
+      "type": "object",
+      "properties": {
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "sourceScriptId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "provider": { "const": "unseeded" },
+        "operation": { "enum": ["float", "integer"] },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "value": { "type": "number" }
+      },
+      "required": ["ordinal", "provider", "operation", "value"],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "format": { "const": "dungeon-scrivener-player-save" },
+    "schemaVersion": { "const": 1 },
+    "projectId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+    "gameVersion": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/gameVersion" },
+    "engineVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+    "contentFingerprint": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "slotId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+    "slotLabel": { "type": "string", "maxLength": 128 },
+    "savedAt": { "type": "string", "format": "date-time" },
+    "session": {
+      "type": "object",
+      "properties": {
+        "currentNodeId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "state": {
+          "type": "object",
+          "properties": {
+            "world": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars" },
+            "nodes": {
+              "type": "object",
+              "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+              "additionalProperties": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars" }
+            },
+            "entities": {
+              "type": "object",
+              "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+              "additionalProperties": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars" }
+            }
+          },
+          "required": ["world", "nodes", "entities"],
+          "additionalProperties": false
+        },
+        "nodeVisitCounts": {
+          "type": "object",
+          "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "conversationStack": { "type": "array", "items": { "$ref": "#/$defs/conversationContext" } },
+        "gameTimeMilliseconds": { "type": "integer", "minimum": 0 },
+        "randomnessMode": { "enum": ["seeded", "unseeded"] },
+        "randomSeed": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+            { "type": "null" }
+          ]
+        },
+        "randomOutcomes": { "type": "array", "items": { "$ref": "#/$defs/randomOutcome" } },
+        "ruleGuards": {
+          "type": "object",
+          "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+          "additionalProperties": { "type": "boolean" }
+        },
+        "inventory": { "type": "array", "items": { "$ref": "#/$defs/inventoryStack" } },
+        "entityTags": {
+          "type": "object",
+          "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+          "additionalProperties": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "clockState": {
+          "type": "object",
+          "properties": {
+            "visibility": { "enum": ["visible", "hidden"] },
+            "focused": { "type": "boolean" },
+            "lastObservedEpochMilliseconds": {
+              "oneOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "null" }
+              ]
+            },
+            "inactiveSinceEpochMilliseconds": {
+              "oneOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["visibility", "focused", "lastObservedEpochMilliseconds", "inactiveSinceEpochMilliseconds"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["currentNodeId", "state", "nodeVisitCounts", "conversationStack", "gameTimeMilliseconds", "randomnessMode", "randomSeed", "randomOutcomes", "ruleGuards", "inventory", "entityTags", "clockState"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "randomnessMode": { "const": "seeded" } } },
+          "then": {
+            "properties": {
+              "randomSeed": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+            }
+          },
+          "else": {
+            "properties": { "randomSeed": { "type": "null" } }
+          }
+        }
+      ]
+    }
+  },
+  "required": ["format", "schemaVersion", "projectId", "gameVersion", "engineVersion", "contentFingerprint", "slotId", "savedAt", "session"],
+  "additionalProperties": false
+}

@@ -1,0 +1,54 @@
+{
+  "format": "dungeon-scrivener-player-save",
+  "schemaVersion": 1,
+  "projectId": "tavern-at-dusk",
+  "gameVersion": "1.0.0",
+  "engineVersion": "1.0.0",
+  "contentFingerprint": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "slotId": "slot-one",
+  "slotLabel": "Evening",
+  "savedAt": "2026-09-23T00:00:00.000Z",
+  "session": {
+    "currentNodeId": "old-gate",
+    "state": {
+      "world": {
+        "trust": 0
+      },
+      "nodes": {},
+      "entities": {
+        "traveler": {
+          "mood": "calm"
+        }
+      }
+    },
+    "nodeVisitCounts": {
+      "old-gate": 1
+    },
+    "conversationStack": [],
+    "gameTimeMilliseconds": 0,
+    "randomnessMode": "unseeded",
+    "randomSeed": null,
+    "randomOutcomes": [
+      {
+        "ordinal": 0,
+        "sourceScriptId": "roll-script",
+        "provider": "unseeded",
+        "operation": "integer",
+        "minimum": 1,
+        "maximum": 3,
+        "value": 2
+      }
+    ],
+    "ruleGuards": {},
+    "inventory": [],
+    "entityTags": {
+      "traveler": ["known"]
+    },
+    "clockState": {
+      "visibility": "visible",
+      "focused": true,
+      "lastObservedEpochMilliseconds": null,
+      "inactiveSinceEpochMilliseconds": null
+    }
+  }
+}

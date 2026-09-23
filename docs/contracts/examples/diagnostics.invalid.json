@@ -1,0 +1,17 @@
+{
+  "format": "dungeon-scrivener-diagnostics",
+  "schemaVersion": 1,
+  "diagnostics": [
+    {
+      "code": "MODEL-1",
+      "severity": "warning",
+      "message": "This warning requires acknowledgment before play.",
+      "path": "world.json",
+      "entityId": "old-gate",
+      "blocks": [],
+      "acknowledgementRequired": [
+        "play"
+      ]
+    }
+  ]
+}

@@ -1,2 +1,3 @@
 def main():
-    trust = api.read({"kind": "world"}, "trust")
+    if not api.hasTag("cellar-rowan", "startled"):
+        api.request({"kind": "add-tag", "entityId": "cellar-rowan", "tag": "startled"})

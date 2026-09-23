@@ -2,6 +2,7 @@
   {
     "browser": "chromium",
     "result": "PASS",
+    "verifiedArtifact": "PASS: extracted and opened archive copy with 3 byte-identical stored members",
     "directFileOpen": "file:",
     "storyAndActions": "PASS",
     "localMedia": "PASS: local PNG and WAV loaded.",
@@ -28,15 +29,15 @@
     ],
     "networkRequests": [
       {
-        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/index.html",
+        "url": "file:///var/folders/px/q366178x1wqggc3gpjg9kb0r0000gn/T/ds-direct-open-archive-Rw8ck4/index.html",
         "resourceType": "document"
       },
       {
-        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/assets/lantern-map.png",
+        "url": "file:///var/folders/px/q366178x1wqggc3gpjg9kb0r0000gn/T/ds-direct-open-archive-Rw8ck4/assets/lantern-map.png",
         "resourceType": "image"
       },
       {
-        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/assets/night-birds.wav",
+        "url": "file:///var/folders/px/q366178x1wqggc3gpjg9kb0r0000gn/T/ds-direct-open-archive-Rw8ck4/assets/night-birds.wav",
         "resourceType": "media"
       }
     ],
@@ -65,6 +66,7 @@
   {
     "browser": "firefox",
     "result": "PASS",
+    "verifiedArtifact": "PASS: extracted and opened archive copy with 3 byte-identical stored members",
     "directFileOpen": "file:",
     "storyAndActions": "PASS",
     "localMedia": "PASS: local PNG and WAV loaded.",
@@ -93,7 +95,7 @@
     "consoleMessages": [
       {
         "type": "error",
-        "text": "[JavaScript Error: \"Security Error: Content at moz-nullprincipal:{6c285b6f-732d-4715-839d-9f8c7a92df9b}?file://UNIVERSAL_FILE_URI_ORIGIN may not load or link to file:///etc/hosts.\"]"
+        "text": "[JavaScript Error: \"Security Error: Content at moz-nullprincipal:{10553838-6eb6-48fe-a820-7e829557ac26}?file://UNIVERSAL_FILE_URI_ORIGIN may not load or link to file:///etc/hosts.\"]"
       },
       {
         "type": "error",
@@ -106,16 +108,17 @@
   {
     "browser": "webkit",
     "result": "FAIL",
-    "error": "page.goto: WebKit encountered an internal error\nCall log:\n\u001b[2m  - navigating to \"file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/index.html\", waiting until \"load\"\u001b[22m\n\n    at /Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/verify.mjs:37:16",
+    "verifiedArtifact": "PASS: extracted and opened archive copy with 3 byte-identical stored members",
+    "error": "page.goto: WebKit encountered an internal error\nCall log:\n\u001b[2m  - navigating to \"file:///var/folders/px/q366178x1wqggc3gpjg9kb0r0000gn/T/ds-direct-open-archive-Rw8ck4/index.html\", waiting until \"load\"\u001b[22m\n\n    at /Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/verify.mjs:46:16",
     "networkRequests": [
       {
-        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/index.html",
+        "url": "file:///var/folders/px/q366178x1wqggc3gpjg9kb0r0000gn/T/ds-direct-open-archive-Rw8ck4/index.html",
         "resourceType": "document"
       }
     ],
     "failedRequests": [
       {
-        "url": "file:///Users/commsult/Developer/personal-dev/dungeon-scrivener/spikes/direct-open/index.html",
+        "url": "file:///var/folders/px/q366178x1wqggc3gpjg9kb0r0000gn/T/ds-direct-open-archive-Rw8ck4/index.html",
         "failure": "WebKit encountered an internal error"
       }
     ],

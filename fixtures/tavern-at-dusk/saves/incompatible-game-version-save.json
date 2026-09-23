@@ -1,0 +1,75 @@
+{
+  "format": "dungeon-scrivener-player-save",
+  "schemaVersion": 1,
+  "projectId": "tavern-at-dusk",
+  "gameVersion": "0.9.0",
+  "engineVersion": "1.0.0",
+  "contentFingerprint": "sha256:8d7e9d954fde3a44ad3b6938b4e8563b0e3aa3203f8f984e5e987e19f0aa0ad6",
+  "slotId": "legacy-evening",
+  "savedAt": "2026-09-23T00:00:00.000Z",
+  "session": {
+    "currentNodeId": "taproom",
+    "state": {
+      "world": {
+        "trust": 1,
+        "bell-rung": true,
+        "bell-echoes": 2
+      },
+      "nodes": {
+        "taproom": {
+          "return-visits": 1
+        }
+      },
+      "entities": {
+        "keeper-mira": {
+          "disposition": "welcoming"
+        },
+        "cellar-rowan": {
+          "disposition": "guarded"
+        }
+      }
+    },
+    "nodeVisitCounts": {
+      "taproom": 2,
+      "cellar": 1
+    },
+    "conversationStack": [],
+    "gameTimeMilliseconds": 120000,
+    "randomSeed": null,
+    "randomOutcomes": [
+      {
+        "ordinal": 0,
+        "sourceScriptId": "keeper-check",
+        "provider": "unseeded",
+        "operation": "integer",
+        "minimum": 1,
+        "maximum": 3,
+        "value": 2
+      }
+    ],
+    "ruleGuards": {},
+    "inventory": [
+      {
+        "owner": {
+          "kind": "world"
+        },
+        "itemId": "silver-key",
+        "quantity": 1,
+        "fields": {}
+      }
+    ],
+    "randomnessMode": "unseeded",
+    "entityTags": {
+      "cellar-rowan": [
+        "startled"
+      ],
+      "keeper-mira": []
+    },
+    "clockState": {
+      "visibility": "visible",
+      "focused": true,
+      "lastObservedEpochMilliseconds": 1360000,
+      "inactiveSinceEpochMilliseconds": null
+    }
+  }
+}

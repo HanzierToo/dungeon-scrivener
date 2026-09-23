@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:project-manifest",
+  "title": "DungeonScrivener project manifest v1",
+  "type": "object",
+  "properties": {
+    "format": { "const": "dungeon-scrivener-project" },
+    "schemaVersion": { "const": 1 },
+    "projectId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "defaultLocale": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/locale" },
+    "gameVersion": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/gameVersion" }
+  },
+  "required": ["format", "schemaVersion", "projectId", "title", "defaultLocale", "gameVersion"],
+  "additionalProperties": false
+}

@@ -3,5 +3,6 @@
   "schemaVersion": 1,
   "projectId": "linear-three-nodes",
   "title": "The Lantern Crossing",
-  "defaultLocale": "en-GB"
+  "defaultLocale": "en-GB",
+  "gameVersion": "1.0.0"
 }

@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const indexUrl = pathToFileURL(path.join(root, 'index.html')).href;
+const execFileAsync = promisify(execFile);
+const archivePath = path.join(root, 'dungeon-scrivener-direct-open.zip');
+const extractionRoot = await mkdtemp(path.join(os.tmpdir(), 'ds-direct-open-archive-'));
+const extraction = await execFileAsync('python3', [
+  path.join(root, 'scripts', 'extract-demo-zip.py'), archivePath, extractionRoot
+]);
+const archiveExtraction = extraction.stdout.trim();
+const indexUrl = pathToFileURL(path.join(extractionRoot, 'index.html')).href;
 const reports = [];
 const engines = [
   ['chromium', chromium],
@@ -98,6 +107,7 @@ for (const [name, engine] of engines) {
     reports.push({
       browser: name,
       result: 'PASS',
+      verifiedArtifact: archiveExtraction,
       directFileOpen: runtime.protocol,
       storyAndActions: 'PASS',
       localMedia: runtime.media,
@@ -112,6 +122,7 @@ for (const [name, engine] of engines) {
     reports.push({
       browser: name,
       result: 'FAIL',
+      verifiedArtifact: archiveExtraction,
       error: error.stack || error.message,
       runtime,
       beforeSave,
@@ -130,4 +141,5 @@ console.log(JSON.stringify(reports, null, 2));
 const evidenceDir = path.join(root, 'evidence');
 await mkdir(evidenceDir, { recursive: true });
 await writeFile(path.join(evidenceDir, 'browser-results.json'), JSON.stringify(reports, null, 2) + '\n');
+await rm(extractionRoot, { recursive: true, force: true });
 if (reports.some((item) => item.result !== 'PASS')) process.exitCode = 1;

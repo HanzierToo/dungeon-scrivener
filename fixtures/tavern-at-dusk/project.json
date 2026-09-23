@@ -3,5 +3,6 @@
   "schemaVersion": 1,
   "projectId": "tavern-at-dusk",
   "title": "Tavern at Dusk",
-  "defaultLocale": "en-GB"
+  "defaultLocale": "en-GB",
+  "gameVersion": "1.0.0"
 }

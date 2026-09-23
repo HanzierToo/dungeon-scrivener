@@ -1,0 +1,336 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:common",
+  "title": "DungeonScrivener common v1 definitions",
+  "type": "object",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "locale": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 35,
+      "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\u0000-\\u001F\\u007F]).+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "gameVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "scalar": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" }
+      ]
+    },
+    "jsonValue": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/jsonValue" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      ]
+    },
+    "recordOfScalars": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": { "$ref": "#/$defs/scalar" }
+    },
+    "recordOfJson": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    },
+    "valueType": {
+      "oneOf": [
+        { "enum": ["string", "number", "integer", "boolean"] },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "enum" },
+            "values": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+            }
+          },
+          "required": ["kind", "values"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "textSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "literal" },
+            "text": { "type": "string" }
+          },
+          "required": ["kind", "text"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "locale-key" },
+            "key": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "key"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "stateScope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "kind": { "const": "world" } },
+          "required": ["kind"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "node" },
+            "ownerId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "ownerId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "entity" },
+            "ownerId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "ownerId"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "stateReference": {
+      "type": "object",
+      "properties": {
+        "scope": { "$ref": "#/$defs/stateScope" },
+        "key": { "$ref": "#/$defs/id" }
+      },
+      "required": ["scope", "key"],
+      "additionalProperties": false
+    },
+    "sourceSpan": {
+      "type": "object",
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "startLine": { "type": "integer", "minimum": 1 },
+        "startColumn": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 },
+        "endColumn": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["path", "startLine", "startColumn", "endLine", "endColumn"],
+      "additionalProperties": false
+    },
+    "condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "all" },
+            "conditions": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/condition" }
+            }
+          },
+          "required": ["kind", "conditions"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "any" },
+            "conditions": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/condition" }
+            }
+          },
+          "required": ["kind", "conditions"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "not" },
+            "condition": { "$ref": "#/$defs/condition" }
+          },
+          "required": ["kind", "condition"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "compare-state" },
+            "left": { "$ref": "#/$defs/stateReference" },
+            "operator": { "enum": ["eq", "neq", "lt", "lte", "gt", "gte"] },
+            "right": { "$ref": "#/$defs/scalar" }
+          },
+          "required": ["kind", "left", "operator", "right"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "has-tag" },
+            "entityId": { "$ref": "#/$defs/id" },
+            "tag": { "type": "string", "minLength": 1, "maxLength": 128 }
+          },
+          "required": ["kind", "entityId", "tag"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "at-node" },
+            "nodeId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "nodeId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "event-is" },
+            "eventId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "eventId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "time-at-least" },
+            "milliseconds": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["kind", "milliseconds"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "effect": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "set-state" },
+            "target": { "$ref": "#/$defs/stateReference" },
+            "value": { "$ref": "#/$defs/scalar" }
+          },
+          "required": ["kind", "target", "value"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "increment-state" },
+            "target": { "$ref": "#/$defs/stateReference" },
+            "amount": { "type": "number" }
+          },
+          "required": ["kind", "target", "amount"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "enum": ["add-tag", "remove-tag"] },
+            "entityId": { "$ref": "#/$defs/id" },
+            "tag": { "type": "string", "minLength": 1, "maxLength": 128 }
+          },
+          "required": ["kind", "entityId", "tag"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "emit-event" },
+            "eventId": { "$ref": "#/$defs/id" },
+            "payload": { "type": "object", "additionalProperties": { "$ref": "#/$defs/jsonValue" } }
+          },
+          "required": ["kind", "eventId", "payload"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "navigate" },
+            "edgeId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "edgeId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "enum": ["add-item", "remove-item"] },
+            "owner": { "$ref": "#/$defs/stateScope" },
+            "itemId": { "$ref": "#/$defs/id" },
+            "quantity": { "type": "integer", "minimum": 1 }
+          },
+          "required": ["kind", "owner", "itemId", "quantity"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "enum": ["start-conversation", "interrupt-conversation", "resume-conversation"] },
+            "conversationId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "conversationId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "run-script" },
+            "scriptId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "scriptId"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "eventOccurrence": {
+      "type": "object",
+      "properties": {
+        "eventId": { "$ref": "#/$defs/id" },
+        "payload": { "type": "object", "additionalProperties": { "$ref": "#/$defs/jsonValue" } },
+        "source": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "required": ["eventId", "payload", "source"],
+      "additionalProperties": false
+    }
+  }
+}

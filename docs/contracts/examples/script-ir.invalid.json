@@ -1,0 +1,33 @@
+{
+  "format": "dungeon-scrivener-script-ir",
+  "schemaVersion": 1,
+  "scriptId": "greeting",
+  "sourceLanguage": "javascript",
+  "sourcePath": "scripts/greeting.js",
+  "entrypoint": "main",
+  "functions": [
+    {
+      "name": "not-valid",
+      "parameters": [],
+      "body": [
+        {
+          "kind": "return",
+          "span": {
+            "path": "scripts/greeting.js",
+            "startLine": 1,
+            "startColumn": 1,
+            "endLine": 1,
+            "endColumn": 16
+          }
+        }
+      ],
+      "span": {
+        "path": "scripts/greeting.js",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 1,
+        "endColumn": 16
+      }
+    }
+  ]
+}
