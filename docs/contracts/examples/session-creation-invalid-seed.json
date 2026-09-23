@@ -1,0 +1,15 @@
+{
+  "ok": false,
+  "diagnostics": {
+    "format": "dungeon-scrivener-diagnostics",
+    "schemaVersion": 1,
+    "diagnostics": [
+      {
+        "code": "DS-ENG-002",
+        "severity": "error",
+        "message": "Supplied randomSeed must be an unsigned 32-bit integer.",
+        "blocks": ["play"]
+      }
+    ]
+  }
+}

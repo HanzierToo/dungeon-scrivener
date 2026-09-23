@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "operation": "decode",
+  "partialSave": { "format": "dungeon-scrivener-player-save" }
+}

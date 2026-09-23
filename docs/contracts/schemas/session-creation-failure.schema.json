@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:session-creation-failure",
+  "title": "DungeonScrivener session creation failure v1",
+  "type": "object",
+  "properties": {
+    "ok": { "const": false },
+    "diagnostics": { "$ref": "urn:dungeon-scrivener:schema:v1:diagnostics" }
+  },
+  "required": ["ok", "diagnostics"],
+  "additionalProperties": false
+}

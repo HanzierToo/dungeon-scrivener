@@ -662,6 +662,10 @@ export interface SessionStartOptions {
   readonly focused: boolean;
 }
 
+export type SessionCreationResult =
+  | { readonly ok: true; readonly snapshot: SessionSnapshot }
+  | { readonly ok: false; readonly diagnostics: DiagnosticReport };
+
 export interface ClockInput {
   readonly kind: 'tick' | 'visibility-change' | 'focus-change' | 'resume';
   readonly wallClockEpochMilliseconds: number;
@@ -842,7 +846,7 @@ export interface ProjectVfsApi {
 }
 
 export interface GameEngineApi {
-  createSession(projectId: ProjectId, world: WorldDocument, options: SessionStartOptions): SessionSnapshot;
+  createSession(projectId: ProjectId, world: WorldDocument, options: SessionStartOptions): SessionCreationResult;
   matchCommandText(world: WorldDocument, snapshot: SessionSnapshot, rawText: string): CommandMatchResult;
   dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnapshot, input: PlayerInput): PlayerInputTransitionResult;
   observeClock(world: WorldDocument, snapshot: SessionSnapshot, input: ClockInput): TransitionResult;
@@ -877,8 +881,16 @@ export type SaveCompatibilityResult =
   | { readonly compatible: true; readonly mismatches: readonly [] }
   | { readonly compatible: false; readonly mismatches: readonly [SaveCompatibilityMismatch, ...SaveCompatibilityMismatch[]] };
 
+export type PlayerSaveEncodeResult =
+  | { readonly ok: true; readonly bytes: Uint8Array }
+  | { readonly ok: false; readonly operation: 'encode'; readonly diagnostics: DiagnosticReport };
+
+export type PlayerSaveDecodeResult =
+  | { readonly ok: true; readonly save: PlayerSaveArchive }
+  | { readonly ok: false; readonly operation: 'decode'; readonly diagnostics: DiagnosticReport };
+
 export interface PlayerSaveApi {
-  encodePlayerSave(save: PlayerSaveArchive): Promise<Uint8Array>;
-  decodePlayerSave(bytes: Uint8Array): Promise<PlayerSaveArchive>;
+  encodePlayerSave(save: PlayerSaveArchive): Promise<PlayerSaveEncodeResult>;
+  decodePlayerSave(bytes: Uint8Array): Promise<PlayerSaveDecodeResult>;
   checkSaveCompatibility(save: PlayerSaveArchive, target: SaveCompatibilityTarget): SaveCompatibilityResult;
 }

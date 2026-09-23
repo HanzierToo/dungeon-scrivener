@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:player-save-operation-failure",
+  "title": "DungeonScrivener player-save operation failure v1",
+  "type": "object",
+  "properties": {
+    "ok": { "const": false },
+    "operation": { "enum": ["encode", "decode"] },
+    "diagnostics": { "$ref": "urn:dungeon-scrivener:schema:v1:diagnostics" }
+  },
+  "required": ["ok", "operation", "diagnostics"],
+  "additionalProperties": false
+}

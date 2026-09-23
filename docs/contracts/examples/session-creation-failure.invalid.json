@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "snapshot": { "projectId": "linear-three-nodes" },
+  "diagnostics": {
+    "format": "dungeon-scrivener-diagnostics",
+    "schemaVersion": 1,
+    "diagnostics": []
+  }
+}

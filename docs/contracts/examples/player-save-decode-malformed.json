@@ -1,0 +1,15 @@
+{
+  "ok": false,
+  "operation": "decode",
+  "diagnostics": {
+    "format": "dungeon-scrivener-diagnostics",
+    "schemaVersion": 1,
+    "diagnostics": [
+      {
+        "code": "DS-SAVE-002",
+        "severity": "error",
+        "message": "Save import is malformed or violates the supported ZIP, JSON, schema, or reference contract. Active session was not changed."
+      }
+    ]
+  }
+}

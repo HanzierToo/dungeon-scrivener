@@ -77,6 +77,27 @@ for (const { fileName, schema } of documentSchemas) {
   }
 }
 
+const supplementalExamples = new Map([
+  ["session-creation-invalid-seed.json", "urn:dungeon-scrivener:schema:v1:session-creation-failure"],
+  ["session-creation-invalid-clock.json", "urn:dungeon-scrivener:schema:v1:session-creation-failure"],
+  ["player-save-encode-too-large.json", "urn:dungeon-scrivener:schema:v1:player-save-operation-failure"],
+  ["player-save-decode-malformed.json", "urn:dungeon-scrivener:schema:v1:player-save-operation-failure"],
+]);
+for (const [fileName, schemaId] of supplementalExamples) {
+  expectedExampleFiles.add(fileName);
+  const data = readJson(join(examplesDir, fileName), fileName);
+  const validate = ajv.getSchema(schemaId);
+  if (data === undefined || !validate) {
+    fail(fileName, "could not load supplemental example or schema " + schemaId);
+    continue;
+  }
+  checkedExamples += 1;
+  if (!validate(data)) {
+    fail(fileName, "does not satisfy " + schemaId);
+    reportErrors(fileName, validate.errors);
+  }
+}
+
 for (const fileName of readdirSync(examplesDir).filter((name) => name.endsWith(".json"))) {
   if (!expectedExampleFiles.has(fileName)) fail("examples", "unexpected example file " + fileName);
 }
@@ -297,6 +318,7 @@ function validateFixture(fixtureName) {
     else if (path === "world.json") schema = schemasByFormat.get("dungeon-scrivener-world");
     else if (path.startsWith("locales/")) schema = schemasByFormat.get("dungeon-scrivener-locale");
     else if (path.startsWith("saves/")) schema = schemasByFormat.get("dungeon-scrivener-player-save");
+    else if (path === "compiled-scripts.json") schema = schemasByFormat.get("dungeon-scrivener-compiled-script-bundle");
     if (!schema) {
       fail(fixtureName + "/" + path, "no contract schema is assigned to this fixture JSON path");
       continue;
@@ -346,6 +368,20 @@ function validateFixture(fixtureName) {
   const conversations = uniqueById(world.conversations, fixtureName + "/conversations");
   const items = uniqueById(world.itemDefinitions, fixtureName + "/items");
   const scripts = uniqueById(world.scripts, fixtureName + "/scripts");
+  const compiledBundle = docs.get("compiled-scripts.json");
+  if (compiledBundle) {
+    const compiledById = uniqueById(compiledBundle.scripts, fixtureName + "/compiled-scripts");
+    if (compiledById.size !== scripts.size) {
+      fail(fixtureName + "/compiled-scripts.json", "compiled script IDs must match this world's declarations exactly");
+    }
+    for (const [scriptId, declaration] of scripts) {
+      const compiled = compiledById.get(scriptId);
+      if (!compiled || compiled.sourcePath !== declaration.path
+          || compiled.sourceLanguage !== declaration.language || compiled.entrypoint !== declaration.entrypoint) {
+        fail(fixtureName + "/compiled-scripts.json", "compiled IR does not match world declaration " + scriptId);
+      }
+    }
+  }
   const entry = nodes.get(world.entryNodeId);
   if (!entry) fail(fixtureName, "entryNodeId does not name a node");
   else if (!entry.visitable) fail(fixtureName, "entry node must be visitable");

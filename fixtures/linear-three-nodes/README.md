@@ -19,3 +19,6 @@ A minimal three-node linear story for validating project structure, state effect
 | 2 | Choice cross-bridge | Node lantern-house (ending); lantern-lit = true; time 2000 ms | action(cross-bridge) → node-transition(stone-bridge → lantern-house) → time(1000 → 2000) |
 
 Trace anchors abbreviate TransitionTraceRecord fields. They describe required semantic events and ordering, not a runtime capture. The runtime is implemented in a later task.
+# Linear Three Nodes
+
+This minimal fixture declares no scripts. Its `compiled-scripts.json` is the valid empty `CompiledScriptBundle`; the contract checker verifies it against the world's empty `scripts` declaration list. Session creation still validates the bundle against its supplied world. If a later script-capable engine call supplies a world with a non-empty or otherwise incompatible script declaration set, the transition fails with diagnostics and preserves its input snapshot.
