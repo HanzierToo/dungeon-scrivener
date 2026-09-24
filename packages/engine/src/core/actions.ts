@@ -8,6 +8,9 @@ import { evaluateConditionValue, processEventQueue, processRulePhase, shouldRunL
 import { reduceEffects } from './state.js';
 import { advanceActionTime } from './time.js';
 import { applyInventoryEffect, inventoryOperationEffect } from '../inventory/index.js';
+import {
+  applyDialogueEffect, completeTerminalConversation, prepareDialogueOption, resumeOnReturn, suspendForNavigation,
+} from '../dialogue/index.js';
 
 const MAX_EFFECTS_PER_ACTION = 10_000;
 const MAX_TRACE_RECORDS = 20_000;
@@ -202,6 +205,7 @@ interface ActionContext {
   readonly diagnostics: Diagnostic[];
   readonly events: EventOccurrence[];
   effectCount: number;
+  didNavigate: boolean;
 }
 
 function addTrace(context: ActionContext, record: Omit<TransitionTraceRecord, 'sequence'>): boolean {
@@ -281,6 +285,10 @@ function navigate(context: ActionContext, edgeId: string, source: TraceSource, r
     fail(context, INVALID_NAVIGATION, `Exit effects changed the current node before navigation edge ${edgeId} was applied.`);
     return false;
   }
+  const suspended = suspendForNavigation(context.snapshot, source, reason);
+  if (!addTransitionTrace(context, suspended.trace)) { fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`); return false; }
+  if (suspended.diagnostics.length > 0) { context.diagnostics.push(...suspended.diagnostics); return false; }
+  context.snapshot = suspended.snapshot;
   const fromNodeId = context.snapshot.currentNodeId;
   const previousVisits = context.snapshot.nodeVisitCounts[target.id] ?? 0;
   if (previousVisits >= Number.MAX_SAFE_INTEGER) {
@@ -289,6 +297,7 @@ function navigate(context: ActionContext, edgeId: string, source: TraceSource, r
   }
   const nextVisits = previousVisits + 1;
   const phase = previousVisits === 0 ? 'entry' : 'revisit';
+  context.didNavigate = true;
   context.snapshot = {
     ...context.snapshot,
     currentNodeId: target.id,
@@ -337,6 +346,14 @@ function runEffects(context: ActionContext, effects: readonly Effect[], source: 
       if (!navigate(context, effect.edgeId, source, reason, depth)) return false;
       continue;
     }
+    const dialogue = applyDialogueEffect(
+      context.world, context.snapshot, effect, source, reason,
+      (condition, snapshot, event) => evaluateConditionValue(context.world, snapshot, condition, event),
+    );
+    if (dialogue) {
+      if (!applyRuleTransition(context, dialogue)) return false;
+      continue;
+    }
     const reduced = reduceEffects(context.world, context.snapshot, [effect], source, reason);
     context.snapshot = reduced.snapshot;
     if (!addTransitionTrace(context, reduced.trace)) { fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`); return false; }
@@ -344,6 +361,12 @@ function runEffects(context: ActionContext, effects: readonly Effect[], source: 
       context.diagnostics.push(...reduced.diagnostics.diagnostics);
       return false;
     }
+  }
+  const completed = completeTerminalConversation(context.world, context.snapshot, source, reason);
+  context.snapshot = completed.snapshot;
+  if (!addTransitionTrace(context, completed.trace)) {
+    fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+    return false;
   }
   return true;
 }
@@ -378,6 +401,21 @@ function finishAction(context: ActionContext, advanceTime = true): TransitionRes
   if (timeAdvanced) {
     const timedRules = processRulePhase(context.world, context.snapshot, 'time-advanced', { kind: 'engine', operation: 'action-time-advanced' }, 'Per-action game time advanced.');
     if (!applyRuleTransition(context, timedRules)) return transition(context.original, context.trace, context.diagnostics);
+  }
+  if (context.didNavigate) {
+    const resumed = resumeOnReturn(
+      context.world, context.snapshot, { kind: 'engine', operation: 'resume-conversation-on-return' },
+      (condition, current, event) => evaluateConditionValue(context.world, current, condition, event),
+    );
+    if (!addTransitionTrace(context, resumed.trace)) {
+      fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+      return transition(context.original, context.trace, context.diagnostics);
+    }
+    if (resumed.diagnostics.diagnostics.length > 0) {
+      context.diagnostics.push(...resumed.diagnostics.diagnostics);
+      return transition(context.original, context.trace, context.diagnostics);
+    }
+    context.snapshot = resumed.snapshot;
   }
   return transition(context.snapshot, context.trace, context.diagnostics);
 }
@@ -430,7 +468,7 @@ export function dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, 
     actionId = command.id;
   }
   const source: TraceSource = { kind: 'action', actionId };
-  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0 };
+  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false };
   addTrace(context, { kind: 'action', source, reason: `Player selected action ${actionId}.` });
   if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Action ${actionId} starts.`))) return finishAction(context);
   if (!runEffects(context, effects, source, `Effects for action ${actionId}.`, 0)) return finishAction(context);
@@ -443,7 +481,7 @@ export function enterSessionNode(world: WorldDocument, snapshot: SessionSnapshot
   const node = world.nodes.find((candidate) => candidate.id === snapshot.currentNodeId);
   if (!node || !node.visitable) return transition(snapshot, [], [issue(INVALID_NAVIGATION, `Starting node ${snapshot.currentNodeId} is missing or nonvisitable.`)]);
   const source: TraceSource = { kind: 'engine', operation: 'session-entry' };
-  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0 };
+  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false };
   const previousVisits = context.snapshot.nodeVisitCounts[node.id] ?? 0;
   if (previousVisits >= Number.MAX_SAFE_INTEGER) return transition(snapshot, [], [issue(BUDGET_EXCEEDED, `Visit count for node ${node.id} exceeds the safe integer limit.`)]);
   const phase = previousVisits === 0 ? 'entry' : 'revisit';
@@ -473,7 +511,7 @@ function dispatchInventoryInput(world: WorldDocument, snapshot: SessionSnapshot,
   }
   const actionId = `inventory-${operation.kind}`;
   const source: TraceSource = { kind: 'action', actionId };
-  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0 };
+  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false };
   addTrace(context, { kind: 'action', source, reason: `Player requested inventory operation ${operation.kind}.` });
   if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Inventory ${operation.kind} starts.`))) {
     const result = finishAction(context);
@@ -506,8 +544,54 @@ export function dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnaps
     return inputTransition(snapshot, { kind: 'choice', actionId: input.actionId }, result);
   }
   if (input.kind === 'dialogue-option') {
-    const diagnostic = issue(INVALID_INPUT, 'Dialogue-option dispatch is not implemented by this engine task.');
-    return inputTransition(snapshot, { kind: 'invalid-dialogue-option', diagnostic }, transition(snapshot, [], [diagnostic]));
+    const actionId = `dialogue-${input.optionId}`;
+    const source: TraceSource = { kind: 'action', actionId };
+    const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false };
+    addTrace(context, { kind: 'action', source, reason: `Player selected dialogue option ${input.optionId}.` });
+    if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Dialogue option ${input.optionId} starts.`))) {
+      const result = finishAction(context);
+      return inputTransition(snapshot, { kind: 'invalid-dialogue-option', diagnostic: result.diagnostics.diagnostics[0]! }, result);
+    }
+    const prepared = prepareDialogueOption(
+      world, context.snapshot, input, source,
+      (condition, current, event) => evaluateConditionValue(world, current, condition, event),
+    );
+    if (prepared.kind === 'invalid') {
+      const rejected = transition(snapshot, [{
+        sequence: 0, kind: 'diagnostic', source, reason: prepared.diagnostic.message,
+        diagnosticCode: prepared.diagnostic.code,
+      }], [prepared.diagnostic]);
+      return inputTransition(snapshot, { kind: 'invalid-dialogue-option', diagnostic: prepared.diagnostic }, rejected);
+    }
+    if (prepared.kind === 'disabled') {
+      return inputTransition(snapshot, {
+        kind: 'dialogue-option-disabled', conversationId: input.conversationId,
+        lineId: input.lineId, optionId: input.optionId, disabledReason: prepared.disabledReason,
+      }, transition(snapshot, [], []));
+    }
+    context.snapshot = prepared.operation.snapshot;
+    if (!addTransitionTrace(context, prepared.operation.trace)) {
+      fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+      const result = finishAction(context);
+      return inputTransition(snapshot, { kind: 'invalid-dialogue-option', diagnostic: result.diagnostics.diagnostics[0]! }, result);
+    }
+    if (!runEffects(context, prepared.option.effects, source, `Effects for dialogue option ${input.optionId}.`, 0)) {
+      const result = finishAction(context);
+      return inputTransition(snapshot, { kind: 'invalid-dialogue-option', diagnostic: result.diagnostics.diagnostics[0]! }, result);
+    }
+    const completed = completeTerminalConversation(world, context.snapshot, source, `Dialogue option ${input.optionId} effects completed.`);
+    context.snapshot = completed.snapshot;
+    if (!addTransitionTrace(context, completed.trace)) {
+      fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+      const result = finishAction(context);
+      return inputTransition(snapshot, { kind: 'invalid-dialogue-option', diagnostic: result.diagnostics.diagnostics[0]! }, result);
+    }
+    const result = finishAction(context);
+    const diagnostic = result.diagnostics.diagnostics[0];
+    if (diagnostic) return inputTransition(snapshot, { kind: 'invalid-dialogue-option', diagnostic }, result);
+    return inputTransition(snapshot, {
+      kind: 'dialogue-option', conversationId: input.conversationId, lineId: input.lineId, optionId: input.optionId,
+    }, result);
   }
   const matched = matchCommandText(world, snapshot, input.rawText);
   if (matched.kind === 'invalid-input') return inputTransition(snapshot, matched, transition(snapshot, [], [matched.diagnostic]));

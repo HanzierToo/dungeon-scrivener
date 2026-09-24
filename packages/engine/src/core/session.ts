@@ -103,6 +103,7 @@ export function createSession(
     currentNodeId: world.entryNodeId,
     state: createInitialState(world),
     nodeVisitCounts: Object.fromEntries(world.nodes.map((node) => [node.id, 0])),
+    activeConversation: null,
     conversationStack: [],
     dialogueHistory: [],
     nextInventoryStackOrdinal: 0,

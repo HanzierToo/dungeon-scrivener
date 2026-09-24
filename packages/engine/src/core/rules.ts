@@ -4,6 +4,7 @@ import type {
   TraceSource, TransitionResult, TransitionTraceRecord, ValueType, WorldDocument,
 } from '@dungeon-scrivener/model';
 import { applyInventoryEffect } from '../inventory/index.js';
+import { applyDialogueEffect, completeTerminalConversation } from '../dialogue/index.js';
 import { reduceEffects } from './state.js';
 
 const MAX_CONDITION_NODES = 10_000;
@@ -178,6 +179,22 @@ function evaluateCondition(condition: Condition, context: EvaluationContext): Ev
         if (!context.world.entities.some((entity) => entity.id === current.entityId)) throw new Error(`Condition references unknown entity ${current.entityId}.`);
         value = (context.snapshot.entityTags[current.entityId] ?? []).includes(current.tag);
         break;
+      case 'has-seen-line':
+        if (!context.world.conversations.some((item) => item.id === current.conversationId && item.lines.some((line) => line.id === current.lineId))) {
+          throw new Error(`Dialogue history condition references unknown line ${current.conversationId}:${current.lineId}.`);
+        }
+        value = (context.snapshot.dialogueHistory ?? []).some((entry) => entry.kind === 'line-seen' &&
+          entry.conversationId === current.conversationId && entry.lineId === current.lineId);
+        break;
+      case 'has-selected-dialogue-option': {
+        const definition = context.world.conversations.find((item) => item.id === current.conversationId);
+        if (!definition || !definition.lines.some((line) => line.options?.some((option) => option.id === current.optionId))) {
+          throw new Error(`Dialogue history condition references unknown option ${current.conversationId}:${current.optionId}.`);
+        }
+        value = (context.snapshot.dialogueHistory ?? []).some((entry) => entry.kind === 'option-selected' &&
+          entry.conversationId === current.conversationId && entry.optionId === current.optionId);
+        break;
+      }
       case 'has-item': {
         if (!context.world.itemDefinitions.some((item) => item.id === current.itemId)) throw new Error(`Condition references unknown item ${current.itemId}.`);
         if (!Number.isSafeInteger(current.quantity) || current.quantity <= 0) throw new Error('Inventory condition quantity must be a positive safe integer.');
@@ -210,8 +227,6 @@ function evaluateCondition(condition: Condition, context: EvaluationContext): Ev
         if (!Number.isSafeInteger(current.milliseconds) || current.milliseconds < 0) throw new Error('Condition contains an invalid game-time threshold.');
         value = context.snapshot.gameTimeMilliseconds >= current.milliseconds;
         break;
-      default:
-        throw new Error(`Condition ${current.kind} is not implemented by this engine task.`);
     }
     values.push(value);
   }
@@ -368,6 +383,19 @@ export function processEventQueue(
             if (failed) return failed;
             continue;
           }
+          const dialogue = applyDialogueEffect(
+            world, provisional, effect, ruleSource, effectReason,
+            (condition, currentSnapshot, triggeringEvent) => evaluateCondition(condition, {
+              world, snapshot: currentSnapshot, ...(triggeringEvent ? { event: triggeringEvent } : {}),
+            }).value,
+            current,
+          );
+          if (dialogue) {
+            if (!appendTrace(trace, dialogue.trace)) return fail(BUDGET_EXCEEDED, `Transition trace exceeded the ${MAX_TRACE_RECORDS} record budget.`);
+            if (dialogue.diagnostics.diagnostics.length > 0) return result(snapshot, trace, dialogue.diagnostics.diagnostics);
+            provisional = dialogue.snapshot;
+            continue;
+          }
           const reduced = reduceEffects(world, provisional, [effect], ruleSource, effectReason);
           provisional = reduced.snapshot;
           if (reduced.diagnostics.diagnostics.length > 0) {
@@ -377,6 +405,9 @@ export function processEventQueue(
           }
           if (!appendTrace(trace, reduced.trace)) return fail(BUDGET_EXCEEDED, `Transition trace exceeded the ${MAX_TRACE_RECORDS} record budget.`);
         }
+        const completed = completeTerminalConversation(world, provisional, { kind: 'rule', ruleId: rule.id }, `Rule ${rule.id} effects completed.`);
+        provisional = completed.snapshot;
+        if (!appendTrace(trace, completed.trace)) return fail(BUDGET_EXCEEDED, `Transition trace exceeded the ${MAX_TRACE_RECORDS} record budget.`);
       }
     }
   }
@@ -444,11 +475,26 @@ export function processRulePhase(
           queuedEvents.push(used.event);
           continue;
         }
+        const dialogue = applyDialogueEffect(
+          world, provisional, effect, ruleSource, effectReason,
+          (condition, currentSnapshot, triggeringEvent) => evaluateCondition(condition, {
+            world, snapshot: currentSnapshot, ...(triggeringEvent ? { event: triggeringEvent } : {}),
+          }).value,
+        );
+        if (dialogue) {
+          if (!appendTrace(trace, dialogue.trace)) return fail(BUDGET_EXCEEDED, `Transition trace exceeded the ${MAX_TRACE_RECORDS} record budget.`);
+          if (dialogue.diagnostics.diagnostics.length > 0) return result(snapshot, trace, dialogue.diagnostics.diagnostics);
+          provisional = dialogue.snapshot;
+          continue;
+        }
         const reduced = reduceEffects(world, provisional, [effect], ruleSource, effectReason);
         provisional = reduced.snapshot;
         if (!appendTrace(trace, reduced.trace)) return fail(BUDGET_EXCEEDED, `Transition trace exceeded the ${MAX_TRACE_RECORDS} record budget.`);
         if (reduced.diagnostics.diagnostics.length > 0) return result(snapshot, trace, reduced.diagnostics.diagnostics);
       }
+      const completed = completeTerminalConversation(world, provisional, { kind: 'rule', ruleId: rule.id }, `Rule ${rule.id} effects completed.`);
+      provisional = completed.snapshot;
+      if (!appendTrace(trace, completed.trace)) return fail(BUDGET_EXCEEDED, `Transition trace exceeded the ${MAX_TRACE_RECORDS} record budget.`);
     }
   }
 
