@@ -249,8 +249,8 @@ test('downloads a save ZIP, changes nodes, then imports it to restore the saved 
   const wikiLink = page.getByRole('link', { name: 'the cellar' });
   const wikiLinkCount = await wikiLink.count();
   expect.soft(wikiLinkCount, 'the authored wiki node link should be actionable before saving').toBe(1);
-  const saveButton = page.getByRole('button', { name: /save/i });
-  const loadButton = page.getByRole('button', { name: /load/i });
+  const saveButton = page.getByRole('button', { name: 'Save game', exact: true });
+  const loadButton = page.getByRole('button', { name: 'Load game', exact: true });
   const saveButtonCount = await saveButton.count();
   const loadButtonCount = await loadButton.count();
   expect.soft(saveButtonCount, 'portable player should expose save download').toBe(1);

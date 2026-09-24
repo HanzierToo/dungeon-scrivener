@@ -8,9 +8,9 @@
   },
   "dependencies": {
     "@dungeon-scrivener/model": "0.0.0",
-    "@dungeon-scrivener/i18n": "workspace:*",
-    "@dungeon-scrivener/markdown": "workspace:*",
-    "@dungeon-scrivener/media": "workspace:*",
+    "@dungeon-scrivener/i18n": "0.0.0",
+    "@dungeon-scrivener/markdown": "0.0.0",
+    "@dungeon-scrivener/media": "1.0.0",
     "@xyflow/react": "12.11.6",
     "react": "19.3.0"
   },

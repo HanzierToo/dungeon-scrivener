@@ -9,14 +9,18 @@
     "npm": ">=10"
   },
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/studio"
   ],
   "scripts": {
     "check:contracts": "node docs/contracts/scripts/validate-examples.mjs",
     "typecheck": "tsc --project packages/model/tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test --pass-with-no-tests",
-    "check": "npm run check:contracts && npm run typecheck && npm test"
+    "check": "npm run check:contracts && npm run typecheck && npm test",
+    "dev:studio": "npm run dev --workspace @dungeon-scrivener/studio",
+    "build:studio": "npm run build --workspace @dungeon-scrivener/studio",
+    "typecheck:studio": "npm run typecheck --workspace @dungeon-scrivener/studio"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "6.2.5",

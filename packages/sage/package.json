@@ -7,6 +7,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@dungeon-scrivener/vfs": "workspace:*"
+    "@dungeon-scrivener/vfs": "1.0.0"
   }
 }

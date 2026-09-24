@@ -1,4 +1,9 @@
 {
-  "kind": "invalid-inventory-input",
-  "diagnostic": { "code": "DS-ENG-020", "severity": "error", "message": "The selected stack is unavailable." }
+  "kind": "inventory",
+  "operation": {
+    "kind": "transfer",
+    "stackId": "silver-key",
+    "quantity": 0,
+    "destination": { "owner": { "kind": "world" } }
+  }
 }
