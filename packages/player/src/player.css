@@ -1,0 +1,37 @@
+.ds-player {
+  --ds-player-bg: #171512; --ds-player-surface: #24211c; --ds-player-text: #f7f0df;
+  --ds-player-muted: #c8bea9; --ds-player-accent: #efc46b;
+  color: var(--ds-player-text); background: var(--ds-player-bg); font: 1rem/1.6 system-ui, sans-serif;
+  min-height: 100vh; padding: clamp(1rem, 4vw, 3rem);
+}
+.ds-player *, .ds-player *::before, .ds-player *::after { box-sizing: border-box; }
+.ds-player button, .ds-player input, .ds-player select { font: inherit; color: inherit; background: var(--ds-player-surface); border: 1px solid var(--ds-player-muted); border-radius: .35rem; padding: .55rem .8rem; }
+.ds-player button { cursor: pointer; }
+.ds-player button:disabled { cursor: not-allowed; opacity: .7; }
+.ds-player button:focus-visible, .ds-player a:focus-visible, .ds-player input:focus-visible, .ds-player select:focus-visible, .ds-player summary:focus-visible { outline: 3px solid var(--ds-player-accent); outline-offset: 3px; }
+.ds-player a { color: var(--ds-player-accent); }
+.ds-player__header, .ds-player__toolbar, .ds-player__settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.ds-player__header { border-bottom: 1px solid var(--ds-player-muted); padding-bottom: 1rem; }
+.ds-player__brand h1 { margin: 0; }
+.ds-player__clock, .ds-player__locale { color: var(--ds-player-muted); margin: 0; }
+.ds-player__layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(14rem, 1fr); gap: 2rem; max-width: 76rem; margin: 2rem auto; }
+.ds-player__main { min-width: 0; }
+.ds-player__scene, .ds-player__dialogue, .ds-player__choices, .ds-player__inventory, .ds-player__settings { background: var(--ds-player-surface); border-radius: .6rem; padding: clamp(1rem, 3vw, 2rem); margin-bottom: 1.25rem; overflow-wrap: anywhere; }
+.ds-player__actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+.ds-player__command { display: grid; gap: .5rem; margin-top: 1.5rem; }
+.ds-player__command-row { display: flex; gap: .5rem; }
+.ds-player__command-row input { flex: 1; min-width: 0; }
+.ds-player__inventory ul { padding-left: 1.25rem; }
+.ds-player__inventory li { margin-block: .5rem; }
+.ds-player__item-detail { display: block; color: var(--ds-player-muted); font-size: .9em; }
+.ds-player__content table { border-collapse: collapse; max-width: 100%; }
+.ds-player__content th, .ds-player__content td { border: 1px solid var(--ds-player-muted); padding: .4rem .7rem; }
+.ds-player__content pre { overflow: auto; padding: .8rem; background: var(--ds-player-bg); }
+.ds-player__callout { border-left: .3rem solid var(--ds-player-accent); padding-left: 1rem; }
+.ds-player__embed { border-left: 2px solid var(--ds-player-muted); margin: 1rem 0; padding-left: 1rem; }
+.ds-player__settings { max-width: 76rem; margin-inline: auto; }
+.ds-player__settings label { display: flex; align-items: center; gap: .75rem; margin-block: .75rem; }
+.ds-player__notice, .ds-player__diagnostics { max-width: 76rem; margin: 1rem auto; padding: .75rem 1rem; border: 1px solid var(--ds-player-accent); }
+.ds-player__visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 48rem) { .ds-player__layout { grid-template-columns: 1fr; } .ds-player__header { align-items: flex-start; } }
+@media (prefers-reduced-motion: reduce) { .ds-player *, .ds-player *::before, .ds-player *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
