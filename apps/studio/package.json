@@ -21,7 +21,9 @@
     "@dungeon-scrivener/sage": "1.0.0",
     "@dungeon-scrivener/vfs": "1.0.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "@dungeon-scrivener/exporter": "1.0.0",
+    "@dungeon-scrivener/scripting": "0.0.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

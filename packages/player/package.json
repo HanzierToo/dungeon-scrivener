@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./portable-artifact": {
+      "types": "./dist/portable-artifact.d.ts",
+      "import": "./dist/portable-artifact.js"
+    }
   },
   "dependencies": {
     "@dungeon-scrivener/model": "0.0.0",

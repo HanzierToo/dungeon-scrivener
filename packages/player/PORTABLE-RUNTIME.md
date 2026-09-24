@@ -8,6 +8,17 @@ npm --workspace @dungeon-scrivener/player run build:portable
 
 The build writes `packages/player/dist/dungeon-scrivener-player.js` and `packages/player/dist/dungeon-scrivener-player.css`. The JavaScript is a classic script with no module imports. It includes the Player UI, Agent 13's public engine factory, and the validated IR executor. The CSS has no external imports or URLs. Both files can be copied beside a generated game HTML file and loaded from `file://`.
 
+The same build also exposes the exporter-ready artifact through the package subpath `@dungeon-scrivener/player/portable-artifact`. Studio or other browser-bundled consumers can import it without reading build files:
+
+```ts
+import { getPortablePlayerArtifact } from '@dungeon-scrivener/player/portable-artifact';
+import { exportGame } from '@dungeon-scrivener/exporter';
+
+const result = await exportGame({ ...acceptedGameInput, player: getPortablePlayerArtifact() });
+```
+
+The exported `PortablePlayerArtifact` has `format`, `schemaVersion`, exact `engineVersion`, and UTF-8 `indexHtml` bytes. The HTML shell embeds both the classic runtime and CSS and contains exactly one `<!--DUNGEON_SCRIVENER_EMBEDDED_GAME_DATA-->` marker for the exporter. `getPortablePlayerArtifact()` returns a fresh byte array. The version is maintained in `src/portable-version.ts` and must change when save-restorable engine behavior changes incompatibly.
+
 Embed the serialized `PortableGameData` in a script element and load the artifacts with ordinary HTML tags:
 
 ```html

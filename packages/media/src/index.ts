@@ -81,7 +81,7 @@ function isStaticImage(mediaType: string, bytes: Uint8Array): boolean {
     let hasImageData = false;
     let hasEnd = false;
     while (offset + 12 <= bytes.byteLength) {
-      const length = readU32(bytes, offset);
+      const length = readU32BigEndian(bytes, offset);
       const kind = ascii(bytes, offset + 4, 4);
       const chunkEnd = offset + 12 + length;
       if (chunkEnd > bytes.byteLength || hasEnd) return false;
@@ -184,6 +184,10 @@ function readU16(bytes: Uint8Array, offset: number): number {
 
 function readU32(bytes: Uint8Array, offset: number): number {
   return (bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16) | (bytes[offset + 3]! << 24)) >>> 0;
+}
+
+function readU32BigEndian(bytes: Uint8Array, offset: number): number {
+  return ((bytes[offset]! << 24) | (bytes[offset + 1]! << 16) | (bytes[offset + 2]! << 8) | bytes[offset + 3]!) >>> 0;
 }
 
 async function sha256(bytes: Uint8Array): Promise<ContentDigest> {

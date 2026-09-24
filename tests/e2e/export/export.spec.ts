@@ -101,7 +101,7 @@ async function prepareExport(worldOverride?: WorldDocument): Promise<PreparedExp
   };
   const result = await exportGame(input);
   if (!result.ok) throw new Error(`Export failed: ${JSON.stringify(result.diagnostics)}`);
-  await writeFile(resolve(tmpdir(), 'dungeon-scrivener-28b-sample-export.zip'), result.zipBytes);
+  if (!worldOverride) await writeFile(resolve(tmpdir(), 'dungeon-scrivener-29c-tavern-game.zip'), result.zipBytes);
   const directory = await mkdtemp(resolve(tmpdir(), 'dungeon-scrivener-export-'));
   outputDirectories.push(directory);
   for (const [path, bytes] of Object.entries(unzipSync(result.zipBytes))) {

@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
+    ".": "./src/index.ts",
+    "./executor": "./src/executor/index.ts",
     "./ir": "./src/ir/index.ts"
   },
   "dependencies": {

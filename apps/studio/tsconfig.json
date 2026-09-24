@@ -5,6 +5,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client", "@playwright/test"],
     "allowImportingTsExtensions": true,
+    "noPropertyAccessFromIndexSignature": false,
     "resolveJsonModule": true
   },
   "include": ["src", "vite.config.ts"]

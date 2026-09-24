@@ -2,11 +2,20 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 button, .button { border: 1px solid #53675a; border-radius: 5px; background: #fff; color: inherit; padding: .55rem .8rem; font: inherit; cursor: pointer; }
-button:focus-visible, input:focus-visible { outline: 3px solid #cb762d; outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible, [tabindex="-1"]:focus-visible { outline: 3px solid #cb762d; outline-offset: 2px; }
 .home { max-width: 48rem; margin: 12vh auto; padding: 2rem; display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
 .home h1, .home p { width: 100%; }
-.button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.home label { display: grid; gap: .35rem; width: min(100%, 24rem); font-weight: 600; }
+.home input, .home select { min-width: 0; padding: .55rem; font: inherit; }
+.home span { width: 100%; color: #46554b; }
+.button { position: relative; }
+.button input { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+.button:focus-within { outline: 3px solid #cb762d; outline-offset: 2px; }
+.button.is-disabled { opacity: .65; cursor: wait; }
+.skip-link, .visually-hidden-focusable { position: absolute; z-index: 20; left: .75rem; top: .5rem; padding: .65rem .9rem; background: #fff; color: #17211d; transform: translateY(-180%); }
+.skip-link:focus, .visually-hidden-focusable:focus { transform: translateY(0); }
 .studio { min-height: 100vh; display: flex; flex-direction: column; }
+.studio-workspace { display: flex; flex-direction: column; min-height: 0; }
 header { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; padding: .8rem; background: #17211d; color: white; }
 header nav { display: flex; flex-wrap: wrap; gap: .4rem; margin-left: auto; }
 header button { color: #17211d; }
@@ -19,5 +28,11 @@ header button { color: #17211d; }
 .sage-editor-area { min-width: 0; padding: 1rem; }
 .sage-code-editor { min-height: 55vh; border: 1px solid #a7afa8; background: white; }
 .diagnostics { padding: .8rem 1rem; max-height: 22vh; overflow: auto; background: #fff8e5; }
+.save-reminder { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .5rem 1rem; padding: .75rem; border: 1px solid #80520a; border-radius: .4rem; background: #fff4d5; }
+.save-reminder p { flex: 1 1 20rem; margin: 0; }
+dialog { width: min(38rem, calc(100vw - 2rem)); max-height: min(80vh, 42rem); overflow: auto; border: 1px solid #53675a; border-radius: .6rem; padding: 1.25rem; color: #1d2923; }
+dialog::backdrop { background: rgb(14 22 18 / 65%); }
+.dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; margin-top: 1.25rem; }
+.status[role="alert"] { border-left: 4px solid #9f2929; padding: .5rem .75rem; background: #fff0ed; }
 .clear-recovery { align-self: flex-start; margin: .7rem; }
-@media (max-width: 700px) { header { align-items: flex-start; } header nav { margin-left: 0; } .sage-mode { grid-template-columns: 1fr; } .sage-file-tree { max-height: 35vh; overflow: auto; } }
+@media (max-width: 700px) { header { align-items: flex-start; } header nav { margin-left: 0; } .sage-mode { grid-template-columns: 1fr; } .sage-file-tree { max-height: 35vh; overflow: auto; } .save-reminder { align-items: stretch; } .save-reminder button { flex: 1 1 100%; } }

@@ -4,31 +4,27 @@ import { ApprenticeGraph } from '@dungeon-scrivener/apprentice';
 import { PlaytestDebugger } from '@dungeon-scrivener/debugger';
 import { collectDiagnostics, getAcknowledgementStatus } from '@dungeon-scrivener/diagnostics';
 import { createGameEngine } from '@dungeon-scrivener/engine';
+import { exportGame } from '@dungeon-scrivener/exporter';
 import { createMediaAssetCatalog } from '@dungeon-scrivener/media';
-import { validateProject, type CompiledScriptBundle, type Diagnostic, type LocaleDocument, type ProjectFile, type ProjectManifest, type ProjectVfsSnapshot, type ScriptExecutionContext, type ScriptExecutionResult, type ScriptExecutorApi, type SessionSnapshot, type WorldDocument } from '@dungeon-scrivener/model';
+import { computeContentFingerprint, validateProject, validateProjectManifest, type CompiledScriptBundle, type Diagnostic, type LocaleDocument, type ProjectFile, type ProjectManifest, type ProjectVfsSnapshot, type SessionSnapshot, type WorldDocument } from '@dungeon-scrivener/model';
 import { clearRecovery, loadRecovery, saveRecovery } from '@dungeon-scrivener/persistence';
 import { readProjectFile, readProjectZip, writeProjectZip, createSnapshot } from '@dungeon-scrivener/vfs';
 import { SageMode, SageWorkspace } from '@dungeon-scrivener/sage';
-import { EnginePlayer } from '@dungeon-scrivener/player';
+import { EnginePlayer, isOfflineSafeTheme } from '@dungeon-scrivener/player';
+import { getPortablePlayerArtifact } from '@dungeon-scrivener/player/portable-artifact';
+import { compileWorldScripts, scriptExecutor } from '@dungeon-scrivener/scripting';
 import linearManifest from '../../../fixtures/linear-three-nodes/project.json';
 import linearWorld from '../../../fixtures/linear-three-nodes/world.json';
 import linearLocale from '../../../fixtures/linear-three-nodes/locales/en-GB.json';
+import readmeTemplate from '../../../docs/exports/README.template.md?raw';
 import '@xyflow/react/dist/style.css';
 import './studio.css';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 type Mode = 'home' | 'sage' | 'apprentice' | 'playtest' | 'play';
-const EMPTY_BUNDLE: CompiledScriptBundle = { format: 'dungeon-scrivener-compiled-script-bundle', schemaVersion: 1, scripts: [] };
-const noScriptsExecutor: ScriptExecutorApi = {
-  executeScript(script, _context: ScriptExecutionContext): ScriptExecutionResult {
-    return { ok: false, instructionsExecuted: 0, trace: [], diagnostic: {
-      code: 'DS-STUDIO-SCRIPT-EXECUTOR-UNAVAILABLE', severity: 'error',
-      message: `The scripting package executor is not available from its public workspace export (${script.sourcePath}).`,
-      path: script.sourcePath, blocks: ['play', 'export'],
-    } };
-  },
-};
+type PreparedProject = { snapshot: ProjectVfsSnapshot; manifest: ProjectManifest; world: WorldDocument; locales: LocaleDocument[]; scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog>; resolvedMedia: import('@dungeon-scrivener/model').ResolvedMediaAsset[]; themeCss: string };
+type StudioAction = 'save-project' | 'play' | 'export';
 
 function snapshotFromData(manifest: unknown, world: unknown, locales: Record<string, unknown> = {}): ProjectVfsSnapshot {
   const files: ProjectFile[] = [
@@ -62,13 +58,33 @@ function App(): React.ReactElement {
   const [snapshot, setSnapshot] = useState<ProjectVfsSnapshot | null>(null);
   const [revision, setRevision] = useState(0);
   const [status, setStatus] = useState('');
+  const [operationError, setOperationError] = useState('');
+  const [playActivity, setPlayActivity] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [requestedLocale, setRequestedLocale] = useState<string>();
+  const [unsavedSince, setUnsavedSince] = useState<number>();
+  const [reminderVisible, setReminderVisible] = useState(false);
+  const [reminderDismissedFor, setReminderDismissedFor] = useState<number>();
+  const [confirmation, setConfirmation] = useState<{ action: StudioAction; warnings: Diagnostic[]; run: () => void }>();
+  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState(String(linearManifest.title));
+  const [newVersion, setNewVersion] = useState(String(linearManifest.gameVersion));
+  const [newProjectError, setNewProjectError] = useState('');
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [includeReadme, setIncludeReadme] = useState(true);
+  const [creatorAttribution, setCreatorAttribution] = useState('');
+  const [distributionAttribution, setDistributionAttribution] = useState('');
   const [recoveryAvailable, setRecoveryAvailable] = useState(false);
   const [recoveryProjectId, setRecoveryProjectId] = useState<string | null>(null);
   const [playSnapshot, setPlaySnapshot] = useState<SessionSnapshot>();
+  const [playConfig, setPlayConfig] = useState<{ scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog> }>();
+  const playSnapshotRef = useRef<SessionSnapshot | undefined>(undefined);
+  const confirmationRef = useRef<HTMLDialogElement>(null);
+  const errorDialogRef = useRef<HTMLDialogElement>(null);
+  const exportDialogRef = useRef<HTMLDialogElement>(null);
   const [acknowledged, setAcknowledged] = useState<Set<string>>(() => new Set());
   const workspaceRef = useRef<SageWorkspace | null>(null);
   const snapshotRef = useRef<ProjectVfsSnapshot | null>(null);
-  const mediaAssets = useMemo(() => createMediaAssetCatalog(), []);
   const manifest = useMemo(() => snapshot ? parseFile(snapshot, 'project.json') as ProjectManifest | undefined : undefined, [snapshot, revision]);
   const world = useMemo(() => snapshot ? parseFile(snapshot, 'world.json') as WorldDocument | undefined : undefined, [snapshot, revision]);
   const locales = useMemo(() => snapshot ? [...snapshot.files.keys()]
@@ -116,7 +132,60 @@ function App(): React.ReactElement {
     return () => { active = false; };
   }, [snapshot?.projectId]);
 
-  function openProject(next: ProjectVfsSnapshot, message: string): void {
+  useEffect(() => {
+    if (!unsavedSince || reminderDismissedFor === unsavedSince) return;
+    const checkReminder = (): void => {
+      if (Date.now() - unsavedSince >= 10 * 60 * 1000) setReminderVisible(true);
+    };
+    checkReminder();
+    const timer = window.setInterval(checkReminder, 15_000);
+    return () => window.clearInterval(timer);
+  }, [unsavedSince, reminderDismissedFor]);
+
+  useEffect(() => {
+    if (confirmation) {
+      if (!confirmationRef.current?.open) confirmationRef.current?.showModal();
+    } else if (confirmationRef.current?.open) confirmationRef.current.close();
+  }, [confirmation]);
+
+  useEffect(() => {
+    if (errorDialogOpen) {
+      if (!errorDialogRef.current?.open) errorDialogRef.current?.showModal();
+    } else if (errorDialogRef.current?.open) errorDialogRef.current.close();
+  }, [errorDialogOpen]);
+
+  useEffect(() => {
+    if (exportDialogOpen) {
+      if (!exportDialogRef.current?.open) exportDialogRef.current?.showModal();
+    } else if (exportDialogRef.current?.open) exportDialogRef.current.close();
+  }, [exportDialogOpen]);
+
+  useEffect(() => {
+    if (mode !== 'play' || !playConfig || !world || !playSnapshot) return;
+    const engine = createGameEngine({ scriptExecutor, mediaAssets: playConfig.media, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! }, unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, playConfig.scripts);
+    playSnapshotRef.current = playSnapshot;
+    const timer = window.setInterval(() => {
+      const current = playSnapshotRef.current;
+      if (!current) return;
+      const result = engine.observeClock(world, current, {
+        kind: 'tick', wallClockEpochMilliseconds: Date.now(),
+        visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible', focused: document.hasFocus(),
+      });
+      if (result.diagnostics.diagnostics.some(item => item.severity === 'error' || item.severity === 'fatal')) {
+        setStatus(result.diagnostics.diagnostics.map(item => `${item.code}: ${item.message}`).join(' '));
+        return;
+      }
+      playSnapshotRef.current = result.snapshot;
+      setPlaySnapshot(result.snapshot);
+      const scriptsRun = [...new Set(result.trace.filter(item => item.source.kind === 'script').map(item => item.source.kind === 'script' ? item.source.scriptId : ''))];
+      if (scriptsRun.length) setPlayActivity(`Hosted play ran scripts: ${scriptsRun.join(', ')}.`);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [mode, playConfig, world, playSnapshot?.projectId]);
+
+  function openProject(next: ProjectVfsSnapshot, message: string, unsaved = false): void {
+    setOperationError('');
+    setErrorDialogOpen(false);
     snapshotRef.current = next;
     setSnapshot(next);
     setRecoveryProjectId(next.projectId);
@@ -124,37 +193,125 @@ function App(): React.ReactElement {
     workspaceRef.current = new SageWorkspace(next);
     setRevision(value => value + 1);
     setAcknowledged(new Set());
+    setUnsavedSince(unsaved ? Date.now() : undefined);
+    setReminderVisible(false);
+    setReminderDismissedFor(undefined);
+    setRequestedLocale(undefined);
     setMode('sage');
     setStatus(message);
   }
 
   async function importZip(file?: File): Promise<void> {
-    if (!file) return;
+    if (!file || importing) return;
+    setImporting(true);
     try {
       const imported = await readProjectZip(new Uint8Array(await file.arrayBuffer()));
       openProject(imported, `Imported ${file.name}. Review diagnostics before play or export.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Project ZIP could not be read.');
+    } finally {
+      setImporting(false);
     }
   }
 
   function currentReport(): readonly Diagnostic[] { return report?.diagnostics ?? []; }
 
-  function allowed(action: 'save-project' | 'play' | 'export'): boolean {
+  function failOperation(message: string): void { setOperationError(message); setErrorDialogOpen(true); setStatus(message); }
+
+  async function prepareProject(): Promise<PreparedProject | undefined> {
+    setOperationError('');
+    const acceptedSnapshot = snapshotRef.current ?? snapshot;
+    if (!acceptedSnapshot) return undefined;
+    const acceptedManifest = parseFile(acceptedSnapshot, 'project.json') as ProjectManifest | undefined;
+    const acceptedWorld = parseFile(acceptedSnapshot, 'world.json') as WorldDocument | undefined;
+    const acceptedLocales = [...acceptedSnapshot.files.keys()]
+      .filter(path => /^locales\/[^/]+\.json$/u.test(path))
+      .map(path => parseFile(acceptedSnapshot, path))
+      .filter((item): item is LocaleDocument => typeof item === 'object' && item !== null && 'locale' in item);
+    if (!acceptedManifest || !acceptedWorld) {
+      failOperation('Project manifest or world document is missing or invalid JSON.');
+      return undefined;
+    }
+    const acceptedLocaleMap = Object.fromEntries(acceptedLocales.map(locale => [`locales/${locale.locale}.json`, locale]));
+    const assetHashes = new Set([...acceptedSnapshot.files.keys()].flatMap(path => {
+      const match = /^assets\/sha256\/([a-f0-9]{64})$/u.exec(path);
+      return match ? [match[1]!] : [];
+    }));
+    const projectValidation = validateProject({ manifest: acceptedManifest, world: acceptedWorld, locales: acceptedLocaleMap, filePaths: new Set(acceptedSnapshot.files.keys()), assetHashes });
+    const errors = projectValidation.diagnostics.filter(item => item.severity === 'error' || item.severity === 'fatal');
+    if (errors.length) {
+      failOperation(errors.map(item => `${item.code}: ${item.message}`).join(' '));
+      return undefined;
+    }
+    let scripts: ReturnType<typeof compileWorldScripts>;
+    try {
+      scripts = compileWorldScripts(acceptedWorld, path => {
+        const file = readProjectFile(acceptedSnapshot, path);
+        return file ? decoder.decode(file.bytes) : undefined;
+      });
+    } catch (error) {
+      failOperation(error instanceof Error ? error.message : 'Script source could not be decoded.');
+      return undefined;
+    }
+    if ('diagnostics' in scripts) {
+      failOperation(scripts.diagnostics.map(item => `${item.code}: ${item.message}`).join(' '));
+      return undefined;
+    }
+    const referenced = new Set<string>();
+    const scan = (value: unknown): void => {
+      if (typeof value === 'string') {
+        for (const match of value.matchAll(/!\[\[asset:(sha256:[a-f0-9]{64})\|/gu)) referenced.add(match[1]!);
+      } else if (Array.isArray(value)) value.forEach(scan);
+      else if (typeof value === 'object' && value !== null) Object.values(value).forEach(scan);
+    };
+    scan(acceptedWorld);
+    scan(acceptedLocales);
+    const typingSounds = acceptedWorld.settings.typingSounds;
+    typingSounds?.mappings.forEach(mapping => referenced.add(`sha256:${mapping.assetHash}`));
+    if (typingSounds?.fallback.kind === 'asset') referenced.add(`sha256:${typingSounds.fallback.assetHash}`);
+    const media = createMediaAssetCatalog();
+    const resolvedMedia = [];
+    for (const assetId of referenced) {
+      const digest = assetId.slice('sha256:'.length);
+      const path = `assets/sha256/${digest}`;
+      const file = readProjectFile(acceptedSnapshot, path);
+      if (!file) { failOperation(`Referenced media asset is missing: ${path}`); return undefined; }
+      try {
+        await media.registerAsset({ bytes: file.bytes, originalFilename: `asset-${digest}`, expectedAssetId: assetId as `sha256:${string}` });
+      } catch (error) {
+        failOperation(`${path}: ${error instanceof Error ? error.message : 'Asset registration failed.'}`);
+        return undefined;
+      }
+      const result = media.resolveAsset(assetId as `sha256:${string}`);
+      if (!result.ok) { failOperation(`${result.diagnostic.code}: ${result.diagnostic.message}`); return undefined; }
+      resolvedMedia.push(result.asset);
+    }
+    let themeCss = '';
+    const stylePath = acceptedWorld.settings.playerStylePath;
+    if (stylePath) {
+      const styleFile = readProjectFile(acceptedSnapshot, stylePath);
+      if (!styleFile) { failOperation(`Player style file is missing: ${stylePath}`); return undefined; }
+      try { themeCss = decoder.decode(styleFile.bytes); } catch { failOperation(`Player style file is not valid UTF-8: ${stylePath}`); return undefined; }
+      if (!isOfflineSafeTheme(themeCss)) { failOperation(`Player style is not accepted for offline play or export: ${stylePath}`); return undefined; }
+    }
+    return { snapshot: acceptedSnapshot, manifest: acceptedManifest, world: acceptedWorld, locales: acceptedLocales, scripts, media, resolvedMedia, themeCss };
+  }
+
+  function requestAction(action: StudioAction, run: () => void): void {
     const decision = getAcknowledgementStatus(currentReport(), action, acknowledged);
-    if (!decision.required || decision.acknowledged) return true;
+    if (!decision.required || decision.acknowledged) { run(); return; }
     const pending = currentReport().filter(item => item.severity === 'warning' && item.acknowledgementRequired?.includes(action) && !acknowledged.has(item.code));
-    const confirmed = window.confirm(`Warnings require acknowledgment before ${action}:\n\n${pending.map(item => `${item.code}: ${item.message}`).join('\n\n')}\n\nContinue?`);
-    if (confirmed) setAcknowledged(new Set([...acknowledged, ...pending.map(item => item.code)]));
-    return confirmed;
+    setConfirmation({ action, warnings: pending, run });
   }
 
   async function saveZip(): Promise<void> {
-    if (!snapshot || !allowed('save-project')) return;
+    if (!snapshot) return;
     try {
       download(await writeProjectZip(snapshot), `${manifest?.projectId ?? snapshot.projectId}.zip`, 'application/zip');
       await clearRecovery(snapshot.projectId);
       setRecoveryAvailable(false);
+      setUnsavedSince(undefined);
+      setReminderVisible(false);
       setStatus('Project ZIP downloaded.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Project ZIP could not be written.');
@@ -171,37 +328,62 @@ function App(): React.ReactElement {
     snapshotRef.current = updated;
     setSnapshot(updated);
     workspaceRef.current = new SageWorkspace(updated);
+    setUnsavedSince(Date.now());
+    setReminderVisible(false);
     setStatus('Apprentice changes saved to the project.');
     setRevision(value => value + 1);
   }
 
-  function startPlay(): void {
-    if (!manifest || !world || !allowed('play')) return;
-    const engine = createGameEngine({ scriptExecutor: noScriptsExecutor, mediaAssets, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, EMPTY_BUNDLE);
-    const started = engine.createSession(manifest.projectId, world, { wallClockEpochMilliseconds: Date.now(), visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible', focused: document.hasFocus() });
+  async function startPlay(): Promise<void> {
+    setPlayActivity('');
+    const prepared = await prepareProject();
+    if (!prepared) return;
+    const engine = createGameEngine({ scriptExecutor, mediaAssets: prepared.media, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! }, unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, prepared.scripts);
+    const started = engine.createSession(prepared.manifest.projectId, prepared.world, { wallClockEpochMilliseconds: Date.now(), visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible', focused: document.hasFocus() });
     if (!started.ok) {
-      setStatus(started.diagnostics.diagnostics.map(item => item.message).join(' '));
+      failOperation(started.diagnostics.diagnostics.map(item => `${item.code}: ${item.message}`).join(' '));
       return;
     }
     setPlaySnapshot(started.snapshot);
+    playSnapshotRef.current = started.snapshot;
+    setPlayConfig({ scripts: prepared.scripts, media: prepared.media });
     setMode('play');
   }
 
-  function startPlaytest(): void {
-    if (!manifest || !world || !allowed('play')) return;
-    const engine = createGameEngine({ scriptExecutor: noScriptsExecutor, mediaAssets, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, EMPTY_BUNDLE);
-    const started = engine.createSession(manifest.projectId, world, { wallClockEpochMilliseconds: Date.now(), visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible', focused: document.hasFocus() });
+  async function startPlaytest(): Promise<void> {
+    const prepared = await prepareProject();
+    if (!prepared) return;
+    const engine = createGameEngine({ scriptExecutor, mediaAssets: prepared.media, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! }, unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, prepared.scripts);
+    const started = engine.createSession(prepared.manifest.projectId, prepared.world, { wallClockEpochMilliseconds: Date.now(), visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible', focused: document.hasFocus() });
     if (!started.ok) {
-      setStatus(started.diagnostics.diagnostics.map(item => item.message).join(' '));
+      failOperation(started.diagnostics.diagnostics.map(item => `${item.code}: ${item.message}`).join(' '));
       return;
     }
     setPlaySnapshot(started.snapshot);
+    playSnapshotRef.current = started.snapshot;
+    setPlayConfig({ scripts: prepared.scripts, media: prepared.media });
     setMode('playtest');
   }
 
-  function exportNotice(): void {
-    if (!allowed('export')) return;
-    setStatus('Static export is unavailable: the model fingerprint operation and scripting executor are missing from their documented public package exports.');
+  async function exportProject(): Promise<void> {
+    const prepared = await prepareProject();
+    if (!prepared) return;
+    const fingerprint = computeContentFingerprint(prepared.snapshot, prepared.manifest, prepared.world, prepared.locales);
+    if (!fingerprint.ok) { failOperation(fingerprint.diagnostics.diagnostics.map(item => `${item.code}: ${item.message}`).join(' ')); return; }
+    const result = await exportGame({ manifest: prepared.manifest, world: prepared.world, locales: prepared.locales, scripts: prepared.scripts, acceptedContentFingerprint: fingerprint.value, media: prepared.resolvedMedia, authorStyle: { cssText: prepared.themeCss }, player: getPortablePlayerArtifact() });
+    if (!result.ok) { failOperation(result.diagnostics.diagnostics.map(item => `${item.code}: ${item.message}`).join(' ')); return; }
+    download(result.zipBytes, `${prepared.manifest.projectId}-game.zip`, 'application/zip');
+    if (includeReadme) {
+      const readme = readmeTemplate
+        .replaceAll('{{GAME_NAME}}', prepared.manifest.title)
+        .replaceAll('{{GAME_VERSION}}', prepared.manifest.gameVersion)
+        .replaceAll('{{CREATOR_ATTRIBUTION}}', creatorAttribution.trim() || 'Not provided by the author.')
+        .replaceAll('{{TESTED_BROWSERS}}', 'Browser and version test details should be supplied by the author alongside this README.')
+        .replaceAll('{{DISTRIBUTION_ATTRIBUTION_OR_LICENSE}}', distributionAttribution.trim() || 'No distribution attribution or license details were provided.');
+      download(encoder.encode(readme), `${prepared.manifest.projectId}-README.md`, 'text/markdown;charset=utf-8');
+    }
+    setOperationError('');
+    setStatus('Portable game ZIP downloaded.');
   }
 
   async function restoreRecovery(): Promise<void> {
@@ -209,51 +391,84 @@ function App(): React.ReactElement {
     const result = await loadRecovery(recoveryProjectId);
     if (!result.ok) { setStatus(result.diagnostic.message); return; }
     if (!result.snapshot) { setRecoveryAvailable(false); setStatus('No recovery copy is available.'); return; }
-    openProject(result.snapshot, 'Recovery copy restored.');
+    openProject(result.snapshot, 'Recovery copy restored.', true);
   }
 
   if (!snapshot || mode === 'home') {
     return <main className="home">
       <h1>DungeonScrivener</h1>
       <p>Create and edit a text adventure in Sage or Apprentice Mode.</p>
-      <button onClick={() => openProject(snapshotFromData({ ...linearManifest, projectId: `project-${crypto.randomUUID()}` }, linearWorld, { 'locales/en-GB.json': linearLocale }), 'Starter project created.')}>Create project</button>
-      <label className="button">Import project ZIP<input type="file" accept=".zip,application/zip" onChange={event => void importZip(event.currentTarget.files?.[0])} /></label>
+      <label>Project title<input value={newTitle} onChange={event => setNewTitle(event.currentTarget.value)} required /></label>
+      <label>Default language<select defaultValue="en-GB" disabled aria-describedby="default-language-help"><option value="en-GB">English (en-GB)</option></select></label>
+      <span id="default-language-help">The starter project currently provides English (en-GB).</span>
+      <label>Game version<input value={newVersion} onChange={event => setNewVersion(event.currentTarget.value)} required aria-describedby="game-version-help" /></label>
+      <span id="game-version-help">Enter a semantic version such as 1.0.0. This version is used for save compatibility.</span>
+      {newProjectError && <p role="alert">{newProjectError}</p>}
+      <button onClick={() => {
+        const title = newTitle.trim();
+        if (!title) { setNewProjectError('Enter a project title.'); return; }
+        const projectId = `project-${crypto.randomUUID()}`;
+        const manifestResult = validateProjectManifest({ ...linearManifest, title, gameVersion: newVersion.trim(), defaultLocale: 'en-GB', projectId });
+        if (!manifestResult.ok || !manifestResult.value) {
+          setNewProjectError(manifestResult.diagnostics.map(item => `${item.code}: ${item.message}`).join(' ') || 'The project manifest is invalid.');
+          return;
+        }
+        setNewProjectError('');
+        openProject(snapshotFromData(manifestResult.value, linearWorld, { 'locales/en-GB.json': linearLocale }), 'Starter project created.', true);
+      }}>Create project</button>
+      <label className={`button${importing ? ' is-disabled' : ''}`} aria-busy={importing}>Import project ZIP<input type="file" accept=".zip,application/zip" disabled={importing} onChange={event => void importZip(event.currentTarget.files?.[0])} /></label>
+      {importing && <p role="status" aria-live="polite">Importing project ZIP. Please wait.</p>}
       {recoveryAvailable && <button onClick={() => void restoreRecovery()}>Restore recovery</button>}
       {status && <p role="status">{status}</p>}
     </main>;
   }
 
   const workspace = workspaceRef.current;
+  function markUnsaved(): void { setUnsavedSince(Date.now()); setReminderVisible(false); setReminderDismissedFor(undefined); }
+
   return <div className="studio">
+    <a className="skip-link" href="#studio-workspace">Skip to project workspace</a>
     <header>
       <button onClick={() => setMode('home')}>Projects</button>
       <strong>{manifest?.title ?? manifest?.projectId ?? 'Untitled project'}</strong>
       <nav aria-label="Studio actions">
-        <button onClick={() => { const current = snapshotRef.current ?? snapshot; if (current) { workspaceRef.current = new SageWorkspace(current); setStatus('Sage Mode is using the current project snapshot.'); } setMode('sage'); }}>Sage</button>
-        <button onClick={() => setMode('apprentice')}>Apprentice</button>
-        <button onClick={startPlaytest}>Playtest</button>
-        <button onClick={startPlay}>Play</button>
-        <button onClick={() => void saveZip()}>Save ZIP</button>
-        <button onClick={exportNotice}>Export</button>
+        <button aria-pressed={mode === 'sage'} onClick={() => { const current = snapshotRef.current ?? snapshot; if (current) { workspaceRef.current = new SageWorkspace(current); setStatus('Sage Mode is using the current project snapshot.'); } setMode('sage'); }}>Sage</button>
+        <button aria-pressed={mode === 'apprentice'} onClick={() => setMode('apprentice')}>Apprentice</button>
+        <button onClick={() => requestAction('play', () => { void startPlaytest(); })}>Playtest</button>
+        <button onClick={() => requestAction('play', () => { void startPlay(); })}>Play</button>
+        <button onClick={() => requestAction('save-project', () => { void saveZip(); })}>Download project ZIP</button>
+        <button onClick={() => requestAction('export', () => setExportDialogOpen(true))}>Export game ZIP</button>
       </nav>
     </header>
     {status && <p className="status" role="status">{status}</p>}
+    {playActivity && mode === 'play' && <p className="status" data-testid="hosted-play-activity">{playActivity}</p>}
+    {operationError && <p className="status" role="alert">{operationError}</p>}
+    {unsavedSince !== undefined && reminderVisible && <aside className="save-reminder" role="status" aria-live="polite" aria-label="Unsaved work reminder">
+      <p>You have unsaved project work. Download a project ZIP to keep a portable copy. Recovery is saved locally.</p>
+      <button onClick={() => requestAction('save-project', () => { void saveZip(); })}>Download project ZIP</button>
+      <button onClick={() => { setReminderVisible(false); setReminderDismissedFor(unsavedSince); }}>Dismiss reminder</button>
+    </aside>}
+    <a className="visually-hidden-focusable" href="#project-diagnostics">Skip to diagnostics</a>
+    <div id="studio-workspace" className="studio-workspace" role={mode === 'play' ? 'region' : 'main'} aria-label={mode === 'play' ? 'Game player' : 'Project workspace'} tabIndex={-1}>
     {mode === 'sage' && workspace && <SageMode workspace={workspace} onStateChange={state => {
       if (state.snapshot !== snapshotRef.current) {
         snapshotRef.current = state.snapshot;
         setSnapshot(state.snapshot);
+        markUnsaved();
         setRevision(value => value + 1);
       }
     }} />}
     {mode === 'apprentice' && world && <ApprenticeGraph world={world} onWorldChange={updateWorld} />}
     {mode === 'playtest' && world && playSnapshot && <PlaytestDebugger world={world} initialSnapshot={playSnapshot} />}
-    {mode === 'play' && manifest && world && playSnapshot && <EnginePlayer
-      engine={createGameEngine({ scriptExecutor: noScriptsExecutor, mediaAssets, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, EMPTY_BUNDLE)}
-      manifest={manifest} world={world} locales={locales} snapshot={playSnapshot} onSnapshot={setPlaySnapshot}
+    {mode === 'play' && manifest && world && playSnapshot && playConfig && <EnginePlayer
+      engine={createGameEngine({ scriptExecutor, mediaAssets: playConfig.media, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! }, unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, playConfig.scripts)}
+      manifest={manifest} world={world} locales={locales} snapshot={playSnapshot} {...(requestedLocale ? { requestedLocale } : {})}
+      localeOptions={locales.map(locale => ({ locale: locale.locale, label: locale.locale }))} onLocaleChange={setRequestedLocale}
+      onSnapshot={next => { playSnapshotRef.current = next; setPlaySnapshot(next); }}
     />}
-    {validation && report && report.diagnostics.length > 0 && <aside className="diagnostics" aria-label="Project diagnostics">
+    {validation && report && <aside className="diagnostics" id="project-diagnostics" tabIndex={-1} aria-label="Project diagnostics" aria-live="polite">
       <strong>Project diagnostics</strong>
-      <ul>{report.diagnostics.map((item, index) => <li key={`${item.code}:${index}`}>{item.severity}: {item.message}</li>)}</ul>
+      {report.diagnostics.length ? <ul>{report.diagnostics.map((item, index) => <li key={`${item.code}:${index}`}>{item.severity}: {item.code}: {item.message}</li>)}</ul> : <p>No diagnostics.</p>}
     </aside>}
     <button className="clear-recovery" onClick={async () => {
       if (!snapshot) return;
@@ -261,6 +476,30 @@ function App(): React.ReactElement {
       setStatus(result.ok ? 'Recovery copy cleared.' : result.diagnostic.message);
       if (result.ok) setRecoveryAvailable(false);
     }}>Clear recovery copy</button>
+    </div>
+    <dialog ref={confirmationRef} aria-labelledby="warning-title" aria-describedby="warning-description" onCancel={event => { event.preventDefault(); setConfirmation(undefined); }}>
+      {confirmation && <><h2 id="warning-title">Review warnings before {confirmation.action === 'save-project' ? 'downloading the project' : confirmation.action}</h2>
+        <p id="warning-description">These warnings require your acknowledgment before continuing.</p>
+        <ul>{confirmation.warnings.map((warning, index) => <li key={`${warning.code}:${index}`}><strong>{warning.code}</strong>: {warning.message}</li>)}</ul>
+        <div className="dialog-actions"><button autoFocus onClick={() => setConfirmation(undefined)}>Cancel</button><button onClick={() => {
+          const pending = confirmation;
+          setAcknowledged(new Set([...acknowledged, ...pending.warnings.map(warning => warning.code)]));
+          setConfirmation(undefined);
+          window.setTimeout(pending.run, 0);
+        }}>Acknowledge and continue</button></div></>}
+    </dialog>
+    <dialog ref={exportDialogRef} aria-labelledby="export-title" aria-describedby="export-description" onCancel={event => { event.preventDefault(); setExportDialogOpen(false); }}>
+      <h2 id="export-title">Export {manifest?.title} ({manifest?.gameVersion})</h2>
+      <p id="export-description">The ZIP contains a playable game and its referenced local assets. Extract the complete ZIP and open index.html in a supported desktop browser. Play requires no server or network connection after download. Player saves are separate ZIP downloads that players import later.</p>
+      <p>Share the complete ZIP and make sure you have permission to distribute the story and bundled assets.</p>
+      <label><input type="checkbox" checked={includeReadme} onChange={event => setIncludeReadme(event.currentTarget.checked)} />Also download a README template filled with the game name and version</label>
+      {includeReadme && <><label>Creator attribution<input value={creatorAttribution} onChange={event => setCreatorAttribution(event.currentTarget.value)} /></label><label>Distribution attribution or license<input value={distributionAttribution} onChange={event => setDistributionAttribution(event.currentTarget.value)} /></label><p>The README downloads beside the game ZIP. Browser coverage remains in the release evidence document.</p></>}
+      <div className="dialog-actions"><button autoFocus onClick={() => setExportDialogOpen(false)}>Cancel</button><button onClick={() => { setExportDialogOpen(false); void exportProject(); }}>Build and download</button></div>
+    </dialog>
+    <dialog ref={errorDialogRef} aria-labelledby="error-title" onCancel={event => { event.preventDefault(); setErrorDialogOpen(false); }}>
+      <h2 id="error-title">Action could not continue</h2><p>{operationError}</p>
+      <button autoFocus onClick={() => setErrorDialogOpen(false)}>Close</button>
+    </dialog>
   </div>;
 }
 
