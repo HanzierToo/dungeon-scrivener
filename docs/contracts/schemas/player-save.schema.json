@@ -108,6 +108,12 @@
           "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
           "additionalProperties": { "type": "integer", "minimum": 0 }
         },
+        "activeConversation": {
+          "oneOf": [
+            { "$ref": "#/$defs/conversationContext" },
+            { "type": "null" }
+          ]
+        },
         "gameTimeMilliseconds": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "randomnessMode": { "enum": ["seeded", "unseeded"] },
         "randomSeed": {
@@ -166,7 +172,7 @@
           "additionalProperties": false
         }
       },
-      "required": ["currentNodeId", "state", "nodeVisitCounts", "conversationStack", "dialogueHistory", "gameTimeMilliseconds", "randomnessMode", "randomInitialSeed", "randomSeed", "randomOutcomes", "ruleGuards", "inventory", "nextInventoryStackOrdinal", "entityTags", "clockState"],
+      "required": ["currentNodeId", "state", "nodeVisitCounts", "activeConversation", "conversationStack", "dialogueHistory", "gameTimeMilliseconds", "randomnessMode", "randomInitialSeed", "randomSeed", "randomOutcomes", "ruleGuards", "inventory", "nextInventoryStackOrdinal", "entityTags", "clockState"],
       "additionalProperties": false,
       "allOf": [
         {

@@ -873,13 +873,27 @@ function validateFixture(fixtureName) {
     for (const ruleId of Object.keys(save.session.ruleGuards)) {
       if (!rules.has(ruleId)) fail(label, "ruleGuards references missing rule " + ruleId);
     }
-    for (const context of save.session.conversationStack) {
+    const contexts = [
+      ...(save.session.activeConversation === null ? [] : [save.session.activeConversation]),
+      ...save.session.conversationStack,
+    ];
+    const contextKey = (context) => JSON.stringify([
+      context.conversationId,
+      context.lineId,
+      context.returnNodeId,
+    ]);
+    if (save.session.conversationStack.length > 64) fail(label, "conversationStack exceeds 64 suspended contexts");
+    if (save.session.activeConversation && save.session.conversationStack.some((context) => contextKey(context) === contextKey(save.session.activeConversation))) {
+      fail(label, "activeConversation duplicates a suspended conversation context");
+    }
+    for (const context of contexts) {
       const conversation = conversations.get(context.conversationId);
-      if (!conversation) fail(label, "conversationStack references missing conversation " + context.conversationId);
+      const contextLabel = context === save.session.activeConversation ? "activeConversation" : "conversationStack";
+      if (!conversation) fail(label, contextLabel + " references missing conversation " + context.conversationId);
       else if (!(conversation.lines ?? []).some((line) => line.id === context.lineId)) {
-        fail(label, "conversationStack references missing line " + context.conversationId + ":" + context.lineId);
+        fail(label, contextLabel + " references missing line " + context.conversationId + ":" + context.lineId);
       }
-      if (!nodes.has(context.returnNodeId)) fail(label, "conversationStack references missing return node " + context.returnNodeId);
+      if (!nodes.has(context.returnNodeId)) fail(label, contextLabel + " references missing return node " + context.returnNodeId);
     }
     for (const entry of save.session.dialogueHistory) {
       const conversation = conversations.get(entry.conversationId);

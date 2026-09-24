@@ -33,6 +33,7 @@
       "taproom": 2,
       "cellar": 1
     },
+    "activeConversation": null,
     "conversationStack": [],
     "dialogueHistory": [
       { "kind": "line-seen", "conversationId": "mira-story", "lineId": "mira-first" },

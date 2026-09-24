@@ -625,6 +625,8 @@ export interface SavedSessionState {
     readonly entities: Readonly<Record<EntityId, ScalarRecord>>;
   };
   readonly nodeVisitCounts: Readonly<Record<NodeId, number>>;
+  readonly activeConversation: SavedConversationContext | null;
+  /** Suspended contexts only, ordered oldest to newest. The last entry is the top. */
   readonly conversationStack: readonly SavedConversationContext[];
   /** Chronological session ledger; completion and interruption never remove entries. */
   readonly dialogueHistory: readonly DialogueHistoryEntry[];

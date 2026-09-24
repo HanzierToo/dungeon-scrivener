@@ -24,7 +24,10 @@
     "nodeVisitCounts": {
       "old-gate": 1
     },
-    "conversationStack": [],
+    "activeConversation": { "conversationId": "mira-story", "lineId": "mira-after-return", "returnNodeId": "old-gate" },
+    "conversationStack": [
+      { "conversationId": "mira-story", "lineId": "mira-after-return", "returnNodeId": "old-gate" }
+    ],
     "dialogueHistory": [],
     "gameTimeMilliseconds": 0,
     "randomnessMode": "unseeded",
