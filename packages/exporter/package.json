@@ -1,0 +1,11 @@
+{
+  "name": "@dungeon-scrivener/exporter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@dungeon-scrivener/model": "0.0.0",
+    "fflate": "0.8.3"
+  }
+}
