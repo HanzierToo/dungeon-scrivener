@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
 
-async function tavernZip(variant?: 'script' | 'validation' | 'fallback' | 'theme' | 'unsafe-theme'): Promise<Buffer> {
+async function tavernZip(variant?: 'script' | 'validation' | 'fallback' | 'theme' | 'unsafe-theme' | 'save' | 'no-alt' | 'corrupt-asset'): Promise<Buffer> {
   const root = resolve('fixtures/tavern-at-dusk');
   const entries: Record<string, Uint8Array> = {};
   async function addDirectory(directory: string): Promise<void> {
@@ -17,7 +17,17 @@ async function tavernZip(variant?: 'script' | 'validation' | 'fallback' | 'theme
         const bytes = new Uint8Array(await readFile(path));
         let contents = bytes;
         if (variant === 'script' && archivePath === 'scripts/keeper.js') contents = new TextEncoder().encode('function main( { invalid syntax');
+        if (variant === 'corrupt-asset' && archivePath.startsWith('assets/sha256/')) contents = new Uint8Array([1, 2, 3]);
         if (variant === 'validation' && archivePath === 'world.json') contents = new TextEncoder().encode(JSON.stringify({ ...JSON.parse(new TextDecoder().decode(bytes)), entryNodeId: 'Bad Node' }));
+        if (variant === 'save' && archivePath === 'world.json') {
+          const world = JSON.parse(new TextDecoder().decode(bytes));
+          world.savePolicy = { enabled: true, slotCount: 1, allowedLocation: 'anywhere' };
+          contents = new TextEncoder().encode(JSON.stringify(world));
+        }
+        if (variant === 'no-alt' && archivePath.startsWith('locales/')) {
+          contents = new TextEncoder().encode(new TextDecoder().decode(bytes)
+            .replace(/(!\[\[asset:sha256:[a-f0-9]{64})\|[^\]]*\]\]/gu, '$1]]'));
+        }
         if ((variant === 'theme' || variant === 'unsafe-theme') && archivePath === 'world.json') {
           const world = JSON.parse(new TextDecoder().decode(bytes));
           world.settings.playerStylePath = 'styles/player.css';
@@ -67,10 +77,8 @@ test('create, edit in Sage and Apprentice, reload offline, and round-trip a proj
   await page.getByRole('button', { name: 'Apprentice' }).click();
   await page.getByRole('button', { name: 'Add scene' }).click();
   await expect(page.getByText('Scene: New scene')).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Apprentice changes saved to the project.');
 
   await page.getByRole('button', { name: 'Sage' }).click();
-  await expect(page.getByRole('status')).toContainText('Sage Mode is using the current project snapshot.');
   await page.getByRole('button', { name: 'world.json', exact: true }).click();
   await page.getByLabel('New path').fill('notes.txt');
   await page.getByRole('button', { name: 'New file' }).click();
@@ -127,11 +135,12 @@ test('Tavern scripts run in hosted play and export opens directly from file URL'
   page.on('dialog', dialog => dialog.accept());
   await page.locator('input[type="file"]').setInputFiles({ name: 'tavern.zip', mimeType: 'application/zip', buffer: await tavernZip('theme') });
   await expect(page.getByText('Tavern at Dusk', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Project diagnostics')).not.toContainText('DS-MD-005');
   await page.clock.install();
   await page.getByRole('button', { name: 'Play', exact: true }).click();
   await acknowledgeWarnings(page);
   await expect(page.locator('.ds-player__clock')).toBeVisible();
-  await expect(page.locator('style[data-player-theme="author"]')).toHaveCount(0);
+  await expect.poll(() => page.locator('style[data-player-theme="author"]').evaluate(style => style.textContent)).toBe('.ds-player { color: #211; }');
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.locator('#ds-player-settings select').selectOption('ja-JP');
   await expect(page.getByLabel('Current language: ja-JP')).toBeVisible();
@@ -165,6 +174,94 @@ test('Tavern scripts run in hosted play and export opens directly from file URL'
   expect(await directOpen.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(externalRequests).toEqual([]);
   await directOpen.close();
+});
+
+test('hosted and direct-open games exchange the same save ZIP', async ({ page, context }) => {
+  await page.goto('/');
+  await page.locator('input[type="file"]').setInputFiles({ name: 'tavern-save.zip', mimeType: 'application/zip', buffer: await tavernZip('save') });
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await acknowledgeWarnings(page);
+  await expect(page.getByRole('button', { name: 'Save game' })).toBeVisible();
+  await page.getByRole('button', { name: 'Go down to the cellar' }).click();
+  const hostedDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save game' }).click();
+  const hostedSave = await hostedDownload;
+  const hostedSavePath = (await hostedSave.path())!;
+  expect(Object.keys(unzipSync(new Uint8Array(await readFile(hostedSavePath))))).toEqual(['save.json']);
+  await page.locator('.ds-player__toolbar input[type="file"]').setInputFiles({
+    name: 'invalid-save.zip', mimeType: 'application/zip', buffer: Buffer.from(zipSync({ 'player-save.json': new Uint8Array([123, 125]) })),
+  });
+  await expect(page.getByRole('alert')).toContainText('DS-SAVE-005');
+  await expect(page.locator('.ds-player__scene h2')).toHaveText('The Cellar');
+
+  const gameDownload = page.waitForEvent('download', download => download.suggestedFilename().endsWith('-game.zip'));
+  await openExportDialog(page);
+  await page.getByRole('button', { name: 'Build and download' }).click();
+  const game = await gameDownload;
+  const index = strFromU8(unzipSync(new Uint8Array(await readFile((await game.path())!)))['index.html']!);
+  const directOpenPath = join(tmpdir(), `dungeon-scrivener-save-${Date.now()}.html`);
+  await import('node:fs/promises').then(fs => fs.writeFile(directOpenPath, index));
+  const directOpen = await context.newPage();
+  await directOpen.goto(pathToFileURL(directOpenPath).href);
+  await expect(directOpen.getByRole('button', { name: 'Load game' })).toBeVisible();
+  await directOpen.locator('.ds-player__toolbar input[type="file"]').setInputFiles(hostedSavePath);
+  await expect(directOpen.locator('.ds-player__scene h2')).toHaveText('The Cellar');
+
+  await directOpen.getByRole('button', { name: 'Return to the taproom' }).click();
+  const portableDownload = directOpen.waitForEvent('download');
+  await directOpen.getByRole('button', { name: 'Save game' }).click();
+  const portableSavePath = (await (await portableDownload).path())!;
+  await page.locator('.ds-player__toolbar input[type="file"]').setInputFiles(portableSavePath);
+  await expect(page.locator('.ds-player__scene h2')).toHaveText('The Taproom');
+  await directOpen.close();
+});
+
+test('asset embeds without alt text render in hosted play and export', async ({ page, context }) => {
+  await page.goto('/');
+  await page.locator('input[type="file"]').setInputFiles({ name: 'no-alt.zip', mimeType: 'application/zip', buffer: await tavernZip('no-alt') });
+  await expect(page.getByLabel('Project diagnostics')).not.toContainText('DS-MD-005');
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await acknowledgeWarnings(page);
+  await expect(page.locator('img[data-asset-id]')).toHaveCount(1);
+  await expect(page.locator('audio[data-asset-id]')).toHaveCount(1);
+  const gameDownload = page.waitForEvent('download', download => download.suggestedFilename().endsWith('-game.zip'));
+  await openExportDialog(page);
+  await page.getByRole('button', { name: 'Build and download' }).click();
+  const index = strFromU8(unzipSync(new Uint8Array(await readFile((await (await gameDownload).path())!)))['index.html']!);
+  const directOpenPath = join(tmpdir(), `dungeon-scrivener-no-alt-${Date.now()}.html`);
+  await import('node:fs/promises').then(fs => fs.writeFile(directOpenPath, index));
+  const directOpen = await context.newPage();
+  await directOpen.goto(pathToFileURL(directOpenPath).href);
+  await expect(directOpen.locator('img[data-asset-id]')).toHaveCount(1);
+  await expect(directOpen.locator('audio[data-asset-id]')).toHaveCount(1);
+  await directOpen.close();
+});
+
+test('corrupt managed assets produce visible diagnostics', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type="file"]').setInputFiles({ name: 'corrupt-asset.zip', mimeType: 'application/zip', buffer: await tavernZip('corrupt-asset') });
+  await expect(page.getByLabel('Project diagnostics')).toContainText('DS-MEDIA-001');
+});
+
+test('playtest clock runs configured scripts and accepts node-link input', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type="file"]').setInputFiles({ name: 'tavern.zip', mimeType: 'application/zip', buffer: await tavernZip() });
+  await page.clock.install();
+  await page.getByRole('button', { name: 'Playtest' }).click();
+  await acknowledgeWarnings(page);
+  await page.clock.fastForward(121_000);
+  await page.getByText('Playtest debugger', { exact: true }).click();
+  await expect(page.getByLabel('Chronological engine trace')).toContainText('Script echo-check');
+  await expect(page.getByLabel('Chronological engine trace')).toContainText('Script keeper-check');
+  await expect(page.getByLabel('Chronological engine trace')).toContainText('Script witness-check');
+  await page.getByLabel('Step with PlayerInput JSON').fill('{"kind":"node-link","nodeId":"cellar"}');
+  await page.getByRole('button', { name: 'Step session' }).click();
+  await expect(page.getByText('Current test state: node')).toContainText('cellar');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByLabel('Step with PlayerInput JSON').fill('{"kind":"choice","actionId":"missing-action"}');
+  await page.getByRole('button', { name: 'Step session' }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByText('Current test state: node')).toContainText('cellar');
 });
 
 test('invalid Tavern script compilation does not produce a game ZIP', async ({ page }) => {

@@ -10,7 +10,7 @@ import commonSchema from '../../../docs/contracts/schemas/common.schema.json';
 import playerSaveSchema from '../../../docs/contracts/schemas/player-save.schema.json';
 
 export const PLAYER_SAVE_LIMIT_BYTES = 8 * 1024 * 1024;
-export const PLAYER_SAVE_JSON_PATH = 'player-save.json';
+export const PLAYER_SAVE_JSON_PATH = 'save.json';
 const policyIdPattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });

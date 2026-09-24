@@ -6,11 +6,12 @@ import { collectDiagnostics, getAcknowledgementStatus } from '@dungeon-scrivener
 import { createGameEngine } from '@dungeon-scrivener/engine';
 import { exportGame } from '@dungeon-scrivener/exporter';
 import { createMediaAssetCatalog } from '@dungeon-scrivener/media';
-import { computeContentFingerprint, validateProject, validateProjectManifest, type CompiledScriptBundle, type Diagnostic, type LocaleDocument, type ProjectFile, type ProjectManifest, type ProjectVfsSnapshot, type SessionSnapshot, type WorldDocument } from '@dungeon-scrivener/model';
+import { computeContentFingerprint, validateProject, validateProjectManifest, type CompiledScriptBundle, type Diagnostic, type LocaleDocument, type PlayerSaveArchive, type ProjectFile, type ProjectManifest, type ProjectVfsSnapshot, type SaveCompatibilityTarget, type SessionSnapshot, type WorldDocument } from '@dungeon-scrivener/model';
 import { clearRecovery, loadRecovery, saveRecovery } from '@dungeon-scrivener/persistence';
 import { readProjectFile, readProjectZip, writeProjectZip, createSnapshot } from '@dungeon-scrivener/vfs';
 import { SageMode, SageWorkspace } from '@dungeon-scrivener/sage';
-import { EnginePlayer, isOfflineSafeTheme } from '@dungeon-scrivener/player';
+import { EnginePlayer, isOfflineSafeTheme, PORTABLE_PLAYER_ENGINE_VERSION } from '@dungeon-scrivener/player';
+import { downloadPlayerSave, getSaveSlotChoices, importHostedSaveFile } from '@dungeon-scrivener/player-save';
 import { getPortablePlayerArtifact } from '@dungeon-scrivener/player/portable-artifact';
 import { compileWorldScripts, scriptExecutor } from '@dungeon-scrivener/scripting';
 import linearManifest from '../../../fixtures/linear-three-nodes/project.json';
@@ -24,6 +25,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 type Mode = 'home' | 'sage' | 'apprentice' | 'playtest' | 'play';
 type PreparedProject = { snapshot: ProjectVfsSnapshot; manifest: ProjectManifest; world: WorldDocument; locales: LocaleDocument[]; scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog>; resolvedMedia: import('@dungeon-scrivener/model').ResolvedMediaAsset[]; themeCss: string };
+type PlayConfig = { scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog>; compatibility: SaveCompatibilityTarget; themeCss: string };
 type StudioAction = 'save-project' | 'play' | 'export';
 
 function snapshotFromData(manifest: unknown, world: unknown, locales: Record<string, unknown> = {}): ProjectVfsSnapshot {
@@ -53,6 +55,30 @@ function download(bytes: Uint8Array, name: string, type: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function referencedMedia(world: WorldDocument, locales: readonly LocaleDocument[]): Set<`sha256:${string}`> {
+  const referenced = new Set<`sha256:${string}`>();
+  const scan = (value: unknown): void => {
+    if (typeof value === 'string') {
+      for (const match of value.matchAll(/!\[\[asset:(sha256:[a-f0-9]{64})(?:\|[^\]]*)?\]\]/gu)) {
+        referenced.add(match[1] as `sha256:${string}`);
+      }
+    } else if (Array.isArray(value)) value.forEach(scan);
+    else if (typeof value === 'object' && value !== null) Object.values(value).forEach(scan);
+  };
+  scan(world);
+  scan(locales);
+  const typingSounds = world.settings?.typingSounds;
+  for (const mapping of Array.isArray(typingSounds?.mappings) ? typingSounds.mappings : []) {
+    if (mapping && typeof mapping.assetHash === 'string' && /^[a-f0-9]{64}$/u.test(mapping.assetHash)) {
+      referenced.add(`sha256:${mapping.assetHash}`);
+    }
+  }
+  if (typingSounds?.fallback?.kind === 'asset' && /^[a-f0-9]{64}$/u.test(typingSounds.fallback.assetHash)) {
+    referenced.add(`sha256:${typingSounds.fallback.assetHash}`);
+  }
+  return referenced;
+}
+
 function App(): React.ReactElement {
   const [mode, setMode] = useState<Mode>('home');
   const [snapshot, setSnapshot] = useState<ProjectVfsSnapshot | null>(null);
@@ -60,6 +86,7 @@ function App(): React.ReactElement {
   const [status, setStatus] = useState('');
   const [operationError, setOperationError] = useState('');
   const [playActivity, setPlayActivity] = useState('');
+  const [persistenceNotice, setPersistenceNotice] = useState('');
   const [importing, setImporting] = useState(false);
   const [requestedLocale, setRequestedLocale] = useState<string>();
   const [unsavedSince, setUnsavedSince] = useState<number>();
@@ -77,7 +104,8 @@ function App(): React.ReactElement {
   const [recoveryAvailable, setRecoveryAvailable] = useState(false);
   const [recoveryProjectId, setRecoveryProjectId] = useState<string | null>(null);
   const [playSnapshot, setPlaySnapshot] = useState<SessionSnapshot>();
-  const [playConfig, setPlayConfig] = useState<{ scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog> }>();
+  const [playConfig, setPlayConfig] = useState<PlayConfig>();
+  const [diagnosticMedia, setDiagnosticMedia] = useState<{ snapshot: ProjectVfsSnapshot; media: ReturnType<typeof createMediaAssetCatalog>; diagnostics: Diagnostic[] }>();
   const playSnapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const confirmationRef = useRef<HTMLDialogElement>(null);
   const errorDialogRef = useRef<HTMLDialogElement>(null);
@@ -92,8 +120,42 @@ function App(): React.ReactElement {
     .map(path => parseFile(snapshot, path))
     .filter((item): item is LocaleDocument => typeof item === 'object' && item !== null && 'locale' in item) : [], [snapshot, revision]);
   const localeMap = useMemo(() => Object.fromEntries(locales.map(locale => [`locales/${locale.locale}.json`, locale])), [locales]);
-  const report = useMemo(() => manifest && world ? collectDiagnostics({ manifest, world, locales: localeMap, filePaths: new Set(snapshot?.files.keys()) }) : undefined, [manifest, world, localeMap, snapshot]);
-  const validation = useMemo(() => manifest && world ? validateProject({ manifest, world, locales: localeMap, filePaths: new Set(snapshot?.files.keys()) }) : undefined, [manifest, world, localeMap, snapshot]);
+  const assetHashes = useMemo(() => new Set([...(snapshot?.files.keys() ?? [])].flatMap(path => {
+    const match = /^assets\/sha256\/([a-f0-9]{64})$/u.exec(path);
+    return match ? [match[1]!] : [];
+  })), [snapshot]);
+  const report = useMemo(() => manifest && world && snapshot && diagnosticMedia?.snapshot === snapshot
+    ? collectDiagnostics({ manifest, world, locales: localeMap, filePaths: new Set(snapshot.files.keys()), assetHashes, assets: diagnosticMedia.media, additionalDiagnostics: diagnosticMedia.diagnostics })
+    : undefined, [manifest, world, localeMap, snapshot, assetHashes, diagnosticMedia]);
+  const validation = useMemo(() => manifest && world ? validateProject({ manifest, world, locales: localeMap, filePaths: new Set(snapshot?.files.keys()), assetHashes }) : undefined, [manifest, world, localeMap, snapshot, assetHashes]);
+  const activeEngine = useMemo(() => playConfig ? createGameEngine({
+    scriptExecutor, mediaAssets: playConfig.media,
+    seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! },
+    unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! },
+  }, playConfig.scripts) : undefined, [playConfig]);
+
+  useEffect(() => {
+    if (!snapshot || !world) return;
+    let active = true;
+    const media = createMediaAssetCatalog();
+    void (async () => {
+      const diagnostics: Diagnostic[] = [];
+      for (const assetId of referencedMedia(world, locales)) {
+        const path = `assets/sha256/${assetId.slice('sha256:'.length)}`;
+        const file = readProjectFile(snapshot, path);
+        if (!file) {
+          diagnostics.push({ code: 'DS-MEDIA-MISSING', severity: 'error', message: `Referenced media asset is missing: ${path}`, path, blocks: ['play', 'export'] });
+          continue;
+        }
+        try { await media.registerAsset({ bytes: file.bytes, originalFilename: 'managed-asset', expectedAssetId: assetId }); }
+        catch (error) {
+          diagnostics.push({ code: 'DS-MEDIA-001', severity: 'error', message: `${path}: ${error instanceof Error ? error.message : 'Asset registration failed.'}`, path, blocks: ['play', 'export'] });
+        }
+      }
+      if (active) setDiagnosticMedia({ snapshot, media, diagnostics });
+    })();
+    return () => { active = false; };
+  }, [snapshot, world, locales]);
 
   useEffect(() => {
     const savedId = localStorage.getItem('dungeon-scrivener-last-project');
@@ -161,13 +223,12 @@ function App(): React.ReactElement {
   }, [exportDialogOpen]);
 
   useEffect(() => {
-    if (mode !== 'play' || !playConfig || !world || !playSnapshot) return;
-    const engine = createGameEngine({ scriptExecutor, mediaAssets: playConfig.media, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! }, unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, playConfig.scripts);
+    if (mode !== 'play' || !activeEngine || !world || !playSnapshot) return;
     playSnapshotRef.current = playSnapshot;
     const timer = window.setInterval(() => {
       const current = playSnapshotRef.current;
       if (!current) return;
-      const result = engine.observeClock(world, current, {
+      const result = activeEngine.observeClock(world, current, {
         kind: 'tick', wallClockEpochMilliseconds: Date.now(),
         visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible', focused: document.hasFocus(),
       });
@@ -181,10 +242,11 @@ function App(): React.ReactElement {
       if (scriptsRun.length) setPlayActivity(`Hosted play ran scripts: ${scriptsRun.join(', ')}.`);
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [mode, playConfig, world, playSnapshot?.projectId]);
+  }, [mode, activeEngine, world, playSnapshot?.projectId]);
 
   function openProject(next: ProjectVfsSnapshot, message: string, unsaved = false): void {
     setOperationError('');
+    setPersistenceNotice('');
     setErrorDialogOpen(false);
     snapshotRef.current = next;
     setSnapshot(next);
@@ -257,18 +319,7 @@ function App(): React.ReactElement {
       failOperation(scripts.diagnostics.map(item => `${item.code}: ${item.message}`).join(' '));
       return undefined;
     }
-    const referenced = new Set<string>();
-    const scan = (value: unknown): void => {
-      if (typeof value === 'string') {
-        for (const match of value.matchAll(/!\[\[asset:(sha256:[a-f0-9]{64})\|/gu)) referenced.add(match[1]!);
-      } else if (Array.isArray(value)) value.forEach(scan);
-      else if (typeof value === 'object' && value !== null) Object.values(value).forEach(scan);
-    };
-    scan(acceptedWorld);
-    scan(acceptedLocales);
-    const typingSounds = acceptedWorld.settings.typingSounds;
-    typingSounds?.mappings.forEach(mapping => referenced.add(`sha256:${mapping.assetHash}`));
-    if (typingSounds?.fallback.kind === 'asset') referenced.add(`sha256:${typingSounds.fallback.assetHash}`);
+    const referenced = referencedMedia(acceptedWorld, acceptedLocales);
     const media = createMediaAssetCatalog();
     const resolvedMedia = [];
     for (const assetId of referenced) {
@@ -277,12 +328,12 @@ function App(): React.ReactElement {
       const file = readProjectFile(acceptedSnapshot, path);
       if (!file) { failOperation(`Referenced media asset is missing: ${path}`); return undefined; }
       try {
-        await media.registerAsset({ bytes: file.bytes, originalFilename: `asset-${digest}`, expectedAssetId: assetId as `sha256:${string}` });
+        await media.registerAsset({ bytes: file.bytes, originalFilename: `asset-${digest}`, expectedAssetId: assetId });
       } catch (error) {
         failOperation(`${path}: ${error instanceof Error ? error.message : 'Asset registration failed.'}`);
         return undefined;
       }
-      const result = media.resolveAsset(assetId as `sha256:${string}`);
+      const result = media.resolveAsset(assetId);
       if (!result.ok) { failOperation(`${result.diagnostic.code}: ${result.diagnostic.message}`); return undefined; }
       resolvedMedia.push(result.asset);
     }
@@ -334,10 +385,28 @@ function App(): React.ReactElement {
     setRevision(value => value + 1);
   }
 
+  function configurePlay(prepared: PreparedProject): PlayConfig | undefined {
+    const fingerprint = computeContentFingerprint(prepared.snapshot, prepared.manifest, prepared.world, prepared.locales);
+    if (!fingerprint.ok) {
+      failOperation(fingerprint.diagnostics.diagnostics.map(item => `${item.code}: ${item.message}`).join(' '));
+      return undefined;
+    }
+    return {
+      scripts: prepared.scripts, media: prepared.media, themeCss: prepared.themeCss,
+      compatibility: {
+        manifest: { projectId: prepared.manifest.projectId, gameVersion: prepared.manifest.gameVersion },
+        engineVersion: PORTABLE_PLAYER_ENGINE_VERSION,
+        contentFingerprint: fingerprint.value.digest,
+      },
+    };
+  }
+
   async function startPlay(): Promise<void> {
     setPlayActivity('');
     const prepared = await prepareProject();
     if (!prepared) return;
+    const config = configurePlay(prepared);
+    if (!config) return;
     const engine = createGameEngine({ scriptExecutor, mediaAssets: prepared.media, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! }, unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, prepared.scripts);
     const started = engine.createSession(prepared.manifest.projectId, prepared.world, { wallClockEpochMilliseconds: Date.now(), visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible', focused: document.hasFocus() });
     if (!started.ok) {
@@ -346,13 +415,16 @@ function App(): React.ReactElement {
     }
     setPlaySnapshot(started.snapshot);
     playSnapshotRef.current = started.snapshot;
-    setPlayConfig({ scripts: prepared.scripts, media: prepared.media });
+    setPlayConfig(config);
+    setPersistenceNotice('');
     setMode('play');
   }
 
   async function startPlaytest(): Promise<void> {
     const prepared = await prepareProject();
     if (!prepared) return;
+    const config = configurePlay(prepared);
+    if (!config) return;
     const engine = createGameEngine({ scriptExecutor, mediaAssets: prepared.media, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! }, unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, prepared.scripts);
     const started = engine.createSession(prepared.manifest.projectId, prepared.world, { wallClockEpochMilliseconds: Date.now(), visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible', focused: document.hasFocus() });
     if (!started.ok) {
@@ -361,8 +433,47 @@ function App(): React.ReactElement {
     }
     setPlaySnapshot(started.snapshot);
     playSnapshotRef.current = started.snapshot;
-    setPlayConfig({ scripts: prepared.scripts, media: prepared.media });
+    setPlayConfig(config);
     setMode('playtest');
+  }
+
+  async function saveHosted(slotId: string): Promise<string | undefined> {
+    const current = playSnapshotRef.current;
+    if (!playConfig || !world || !current) return 'No active game session is available.';
+    const slot = getSaveSlotChoices(world.savePolicy).find(choice => choice.slotId === slotId);
+    if (!slot) return 'That save slot is not enabled for this game.';
+    const { projectId: _projectId, ...session } = current;
+    const archive: PlayerSaveArchive = {
+      format: 'dungeon-scrivener-player-save', schemaVersion: 1,
+      projectId: playConfig.compatibility.manifest.projectId,
+      gameVersion: playConfig.compatibility.manifest.gameVersion,
+      engineVersion: playConfig.compatibility.engineVersion,
+      contentFingerprint: playConfig.compatibility.contentFingerprint,
+      slotId, slotLabel: slot.label, savedAt: new Date().toISOString(), session,
+    };
+    const result = await downloadPlayerSave(archive, world.savePolicy, current.currentNodeId, `${archive.projectId}-${slotId}-save.zip`);
+    return result.ok ? undefined : result.diagnostics.diagnostics.map(item => `${item.code}: ${item.message}`).join(' ');
+  }
+
+  async function loadHosted(file: File): Promise<void> {
+    if (!playConfig || !world || !world.savePolicy.enabled) {
+      setPersistenceNotice('Player saves are disabled for this game.');
+      return;
+    }
+    const imported = await importHostedSaveFile(file, playConfig.compatibility);
+    if (!imported.ok) {
+      setPersistenceNotice(imported.reason === 'decode'
+        ? imported.diagnostics.diagnostics.map(item => `${item.code}: ${item.message}`).join(' ')
+        : imported.message);
+      return;
+    }
+    if (!getSaveSlotChoices(world.savePolicy).some(slot => slot.slotId === imported.save.slotId)) {
+      setPersistenceNotice('The save slot is not available under this game policy.');
+      return;
+    }
+    playSnapshotRef.current = imported.snapshot;
+    setPlaySnapshot(imported.snapshot);
+    setPersistenceNotice('');
   }
 
   async function exportProject(): Promise<void> {
@@ -459,12 +570,17 @@ function App(): React.ReactElement {
       }
     }} />}
     {mode === 'apprentice' && world && <ApprenticeGraph world={world} onWorldChange={updateWorld} />}
-    {mode === 'playtest' && world && playSnapshot && <PlaytestDebugger world={world} initialSnapshot={playSnapshot} />}
-    {mode === 'play' && manifest && world && playSnapshot && playConfig && <EnginePlayer
-      engine={createGameEngine({ scriptExecutor, mediaAssets: playConfig.media, seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! }, unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! } }, playConfig.scripts)}
+    {mode === 'playtest' && world && playSnapshot && activeEngine && <PlaytestDebugger world={world} initialSnapshot={playSnapshot}
+      stepSession={(current, input) => activeEngine.dispatchPlayerInput(world, current, input)}
+      observeClock={(current, input) => activeEngine.observeClock(world, current, input)} />}
+    {mode === 'play' && manifest && world && playSnapshot && playConfig && activeEngine && <EnginePlayer
+      engine={activeEngine}
       manifest={manifest} world={world} locales={locales} snapshot={playSnapshot} {...(requestedLocale ? { requestedLocale } : {})}
       localeOptions={locales.map(locale => ({ locale: locale.locale, label: locale.locale }))} onLocaleChange={setRequestedLocale}
       onSnapshot={next => { playSnapshotRef.current = next; setPlaySnapshot(next); }}
+      mediaAssets={playConfig.media} themeCss={playConfig.themeCss} persistenceNotice={persistenceNotice}
+      saveSlots={getSaveSlotChoices(world.savePolicy)} onSave={saveHosted}
+      {...(world.savePolicy.enabled ? { onLoad: (file: File) => { void loadHosted(file); } } : {})}
     />}
     {validation && report && <aside className="diagnostics" id="project-diagnostics" tabIndex={-1} aria-label="Project diagnostics" aria-live="polite">
       <strong>Project diagnostics</strong>

@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "prebuild": "npm run build:portable --workspace @dungeon-scrivener/player",
     "build": "tsc --noEmit && vite build",
+    "pretypecheck": "npm run build:portable --workspace @dungeon-scrivener/player",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1"
   },
@@ -18,6 +20,7 @@
     "@dungeon-scrivener/model": "0.0.0",
     "@dungeon-scrivener/persistence": "1.0.0",
     "@dungeon-scrivener/player": "0.0.0",
+    "@dungeon-scrivener/player-save": "1.0.0",
     "@dungeon-scrivener/sage": "1.0.0",
     "@dungeon-scrivener/vfs": "1.0.0",
     "react": "19.3.0",

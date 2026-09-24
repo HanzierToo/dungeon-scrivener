@@ -13,7 +13,7 @@ export default defineConfig({
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
   webServer: {
-    command: 'cd ../../.. && npx vite build --config apps/studio/vite.config.ts && npm run preview --workspace @dungeon-scrivener/studio -- --port 4179 --strictPort',
+    command: 'cd ../../.. && npm run build:studio && npm run preview --workspace @dungeon-scrivener/studio -- --port 4179 --strictPort',
     url: 'http://127.0.0.1:4179',
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

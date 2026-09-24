@@ -108,7 +108,9 @@ describe('IndexedDB project recovery', () => {
     const restored = await loadRecovery(original.projectId, { indexedDB: factory as unknown as IDBFactory });
     expect(restored.ok).toBe(true);
     if (!restored.ok || restored.snapshot === null) throw new Error('Expected a recovery snapshot.');
-    expect(restored.snapshot.files.get('assets/sha256/audio')?.bytes).toEqual(bytes);
+    const restoredAudio = restored.snapshot.files.get('assets/sha256/audio')?.bytes;
+    expect(restoredAudio).toBeDefined();
+    expect(Buffer.compare(Buffer.from(restoredAudio!), Buffer.from(bytes))).toBe(0);
     expect(restored.snapshot.files.get('assets/sha256/audio')?.mediaType).toBe('audio/mpeg');
     expect(factory.lastDatabase?.closed).toBe(true);
   });

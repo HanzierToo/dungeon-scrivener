@@ -209,7 +209,7 @@ class Compiler {
       if (raw[i] !== '\\') { result += raw[i]; continue; }
       const next = raw[++i];
       const escapes: Record<string, string> = { '\\': '\\', '"': '"', "'": "'", n: '\n', r: '\r', t: '\t' };
-      if (next in escapes) { result += escapes[next]!; continue; }
+      if (next !== undefined && next in escapes) { result += escapes[next]!; continue; }
       if (next === 'u' && raw[i + 1] === '{') {
         const end = raw.indexOf('}', i + 2); const digits = raw.slice(i + 2, end);
         const point = /^[0-9a-fA-F]{1,6}$/.test(digits) ? Number.parseInt(digits, 16) : -1;

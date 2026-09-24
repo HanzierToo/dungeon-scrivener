@@ -1,8 +1,8 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { dispatchPlayerInput, reduceEffects } from '@dungeon-scrivener/engine';
 import type {
-  Effect, PlayerInput, PlayerInputTransitionResult, Scalar, SessionSnapshot, StateReference, ValueType,
-  TransitionTraceRecord, WorldDocument,
+  ClockInput, Effect, PlayerInput, PlayerInputTransitionResult, Scalar, SessionSnapshot, StateReference, ValueType,
+  TransitionResult, TransitionTraceRecord, WorldDocument,
 } from '@dungeon-scrivener/model';
 import { DebuggerPanel } from './DebuggerPanel.js';
 
@@ -20,6 +20,7 @@ interface Checkpoint {
 }
 
 export type DebugPlaytestStep = (snapshot: SessionSnapshot, input: PlayerInput) => PlayerInputTransitionResult;
+export type DebugPlaytestClock = (snapshot: SessionSnapshot, input: ClockInput) => TransitionResult;
 
 export interface PlaytestDebuggerProps {
   readonly world: WorldDocument;
@@ -29,6 +30,7 @@ export interface PlaytestDebuggerProps {
   readonly completeTraceHistory?: boolean;
   /** Supply the app's configured engine dispatch when the world requires script runtime capabilities. */
   readonly stepSession?: DebugPlaytestStep;
+  readonly observeClock?: DebugPlaytestClock;
 }
 
 function copySnapshot(snapshot: SessionSnapshot): SessionSnapshot {
@@ -74,6 +76,7 @@ function isPlayerInput(value: unknown): value is PlayerInput {
   switch (value.kind) {
     case 'choice': return 'actionId' in value && typeof value.actionId === 'string';
     case 'command-text': return 'rawText' in value && typeof value.rawText === 'string';
+    case 'node-link': return 'nodeId' in value && typeof value.nodeId === 'string';
     case 'dialogue-option': return 'conversationId' in value && typeof value.conversationId === 'string' &&
       'lineId' in value && typeof value.lineId === 'string' && 'optionId' in value && typeof value.optionId === 'string';
     case 'inventory': return 'operation' in value && typeof value.operation === 'object' && value.operation !== null &&
@@ -147,7 +150,7 @@ function StepInput({ onStep }: { readonly onStep: (input: PlayerInput) => void }
     event.preventDefault();
     try {
       const value: unknown = JSON.parse(text);
-      if (!isPlayerInput(value)) throw new Error('Enter a supported PlayerInput object: choice, command-text, dialogue-option, or inventory.');
+      if (!isPlayerInput(value)) throw new Error('Enter a supported PlayerInput object: choice, command-text, node-link, dialogue-option, or inventory.');
       setError('');
       onStep(value);
     } catch (caught) {
@@ -174,6 +177,7 @@ export function PlaytestDebugger({
   initialTransitions = [],
   completeTraceHistory = false,
   stepSession,
+  observeClock,
 }: PlaytestDebuggerProps) {
   const initial = useMemo(() => copySnapshot(initialSnapshot), [initialSnapshot]);
   const [snapshot, setSnapshot] = useState<SessionSnapshot>(() => copySnapshot(initial));
@@ -185,6 +189,7 @@ export function PlaytestDebugger({
   const [draft, setDraft] = useState('');
   const [draftFieldId, setDraftFieldId] = useState('');
   const [editMessage, setEditMessage] = useState('');
+  const [stepMessage, setStepMessage] = useState('');
   const fields = useMemo(() => buildEditableFields(world), [world]);
   const selectedField = fields.find((field) => field.id === selectedFieldId) ?? fields[0];
   const value = selectedField ? currentValue(snapshot, selectedField.reference) : undefined;
@@ -193,9 +198,26 @@ export function PlaytestDebugger({
     setTransitions((previous) => [...previous, structuredClone(records)]);
   }
 
+  useEffect(() => {
+    if (!observeClock) return;
+    const timer = window.setInterval(() => {
+      const result = observeClock(snapshot, {
+        kind: 'tick', wallClockEpochMilliseconds: Date.now(),
+        visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible', focused: document.hasFocus(),
+      });
+      const errors = result.diagnostics.diagnostics.filter(item => item.severity === 'error' || item.severity === 'fatal');
+      if (errors.length) { setStepMessage(errors.map(item => `${item.code}: ${item.message}`).join(' ')); return; }
+      setSnapshot(copySnapshot(result.snapshot));
+      if (result.trace.length) appendTransition(result.trace);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [observeClock, snapshot]);
+
   function step(input: PlayerInput): void {
     const result = stepSession ? stepSession(copySnapshot(snapshot), input) : dispatchPlayerInput(world, copySnapshot(snapshot), input);
-    setSnapshot(copySnapshot(result.snapshot));
+    const errors = result.diagnostics.diagnostics.filter(item => item.severity === 'error' || item.severity === 'fatal');
+    setStepMessage(errors.map(item => `${item.code}: ${item.message}`).join(' '));
+    if (!errors.length) setSnapshot(copySnapshot(result.snapshot));
     setDraftFieldId('');
     appendTransition(result.trace);
   }
@@ -218,6 +240,7 @@ export function PlaytestDebugger({
     setDraftFieldId('');
     setTransitions(structuredClone(checkpoint.transitions));
     setEditMessage(`Restored checkpoint ${checkpoint.id}.`);
+    setStepMessage('');
   }
 
   function restart(): void {
@@ -225,6 +248,7 @@ export function PlaytestDebugger({
     setDraftFieldId('');
     setTransitions(structuredClone(initialTransitions));
     setEditMessage('Restarted the isolated playtest session.');
+    setStepMessage('');
   }
 
   function editState(event: FormEvent<HTMLFormElement>): void {
@@ -276,6 +300,7 @@ export function PlaytestDebugger({
         <button type="button" onClick={restart}>Restart test session</button>
       </div>
       <StepInput onStep={step} />
+      {stepMessage && <p role="alert">{stepMessage}</p>}
       <fieldset style={{ border: '2px solid #a44', padding: 12 }}>
         <legend><strong>DEBUG ONLY · Test session state editing</strong></legend>
         <p>Changes go through the engine’s validated <code>set-state</code> effect and remain in this isolated test session.</p>

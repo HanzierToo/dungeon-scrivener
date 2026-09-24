@@ -104,7 +104,7 @@ test('portable runtime starts the Tavern data with Agent 13 public factory', asy
   expect(savePath).toBeTruthy();
   await page.getByRole('link', { name: 'the cellar' }).click();
   await expect(page.getByRole('heading', { name: 'The Cellar' })).toBeVisible();
-  const incompatibleZip = zipSync({ 'player-save.json': strToU8(JSON.stringify(incompatibleSave)) });
+  const incompatibleZip = zipSync({ 'save.json': strToU8(JSON.stringify(incompatibleSave)) });
   await page.locator('input[type="file"]').setInputFiles({ name: 'incompatible-save.zip', mimeType: 'application/zip', buffer: Buffer.from(incompatibleZip) });
   await expect(page.getByRole('alert')).toContainText('gameVersion');
   await expect(page.getByRole('heading', { name: 'The Cellar' })).toBeVisible();
