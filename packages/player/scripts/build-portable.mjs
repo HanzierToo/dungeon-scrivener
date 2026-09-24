@@ -21,7 +21,10 @@ await build({
   configFile: false,
   root: repositoryRoot,
   define: { 'process.env.NODE_ENV': JSON.stringify('production') },
-  resolve: { alias: { '@dungeon-scrivener/engine': engineEntry } },
+  resolve: { alias: {
+    '@dungeon-scrivener/engine': engineEntry,
+    '@dungeon-scrivener/player-save': resolve(repositoryRoot, 'packages/player-save/src/index.ts'),
+  } },
   build: {
     lib: { entry: playerEntry, name: 'DungeonScrivenerPlayer', formats: ['iife'], fileName: () => 'player.js' },
     outDir: playerStage,

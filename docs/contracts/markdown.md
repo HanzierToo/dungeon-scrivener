@@ -7,7 +7,7 @@ The authored source remains the byte-preserved value in node content or locale s
 - CommonMark paragraphs, headings, emphasis, strong emphasis, block quotes, ordered/unordered lists, fenced/inline code, thematic breaks, and tables.
 - Tables use the Markdown table syntax supported by `markdown-it` with its table rule enabled.
 - Callouts are block quotes whose first line is one of `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, or `> [!CAUTION]`. The remaining quoted blocks become the callout body.
-- Stable-node links use `[[node:<nodeId>]]` or `[[node:<nodeId>|<label>]]`. The target is an ID, never a display label.
+- Stable-node links use `[[node:<nodeId>]]` or `[[node:<nodeId>|<label>]]`. The target is an ID, never a display label. The target must exist and be visitable; links to missing or nonvisitable nodes produce a diagnostic and render as inert text. A valid link becomes a `SafeInline` node-link and player activation is routed through `dispatchPlayerInput` as `{ kind: "node-link", nodeId }`.
 - Node embeds use `![[node:<nodeId>]]`. They insert that node's rendered content in place and remain distinct from navigation links.
 - Asset embeds use `![[asset:sha256:<64 lowercase hex digits>|<alt text>]]`. The alt part and separator may be omitted. The asset ID resolves to a local managed file at `assets/sha256/<hex>`.
 - Ordinary Markdown links may target absolute `https://` URLs, `mailto:` URLs, or same-document `#fragment` anchors. They are user-activated links and do not load automatically.

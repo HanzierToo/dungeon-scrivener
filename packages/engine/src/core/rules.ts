@@ -586,12 +586,13 @@ export function processRulePhase(
   source: TraceSource,
   reason: string,
   transaction?: ScriptActionTransaction,
+  initialEvents: readonly EventOccurrence[] = [],
 ): TransitionResult {
   let provisional = snapshot;
   const trace: TransitionTraceRecord[] = [];
   let executions = 0;
   let effectCount = 0;
-  const queuedEvents: EventOccurrence[] = [];
+  const queuedEvents: EventOccurrence[] = [...initialEvents];
   const fail = (code: string, message: string): TransitionResult => {
     const failure = diagnostic(code, message);
     pushTrace(trace, { kind: 'diagnostic', source: { ...source }, reason: message, diagnosticCode: code }, transaction);

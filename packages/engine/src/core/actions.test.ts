@@ -74,6 +74,78 @@ describe('node actions and player input', () => {
     expect(enterAgain.snapshot.state.world['revisits']).toBe(1);
   });
 
+  it('follows visitable node links directly and applies exit, entry, and revisit lifecycle effects', () => {
+    const world: WorldDocument = {
+      ...smallWorld,
+      navigationEdges: [],
+      settings: {
+        ...smallWorld.settings,
+        time: { ...smallWorld.settings.time, mode: 'per-action', millisecondsPerAction: 1_000 },
+      },
+      nodes: [...smallWorld.nodes, {
+        id: 'organizer', parentId: null, visitable: false,
+        title: { kind: 'literal', text: 'Organizer' }, content: { kind: 'literal', text: '' },
+      }],
+    };
+    const initial = makeSnapshot(world);
+    const firstLink = dispatchPlayerInput(world, initial, { kind: 'node-link', nodeId: 'room' });
+    expect(firstLink.resolution).toEqual({ kind: 'node-link', nodeId: 'room' });
+    expect(firstLink.snapshot.currentNodeId).toBe('room');
+    expect(firstLink.snapshot.state.world).toMatchObject({ exits: 1, entries: 1 });
+    expect(firstLink.snapshot.gameTimeMilliseconds).toBe(1_000);
+
+    const back = dispatchPlayerInput(world, firstLink.snapshot, { kind: 'node-link', nodeId: 'start' });
+    const revisit = dispatchPlayerInput(world, back.snapshot, { kind: 'node-link', nodeId: 'room' });
+    expect(revisit.resolution).toEqual({ kind: 'node-link', nodeId: 'room' });
+    expect(revisit.snapshot.state.world).toMatchObject({ exits: 2, entries: 1, revisits: 1 });
+    expect(revisit.snapshot.nodeVisitCounts.room).toBe(2);
+    expect(revisit.snapshot.gameTimeMilliseconds).toBe(3_000);
+
+    for (const nodeId of ['missing', 'organizer', 'start']) {
+      const rejected = dispatchPlayerInput(world, initial, { kind: 'node-link', nodeId });
+      expect(rejected.resolution.kind).toBe('invalid-node-link');
+      expect(rejected.snapshot).toBe(initial);
+      expect(rejected.diagnostics.diagnostics).toHaveLength(1);
+    }
+  });
+
+  it('rolls back a node link when destination lifecycle effects fail', () => {
+    const world: WorldDocument = {
+      ...smallWorld,
+      nodes: smallWorld.nodes.map((node) => node.id === 'room' ? {
+        ...node,
+        lifecycle: {
+          ...node.lifecycle,
+          entry: { policy: 'every-time', effects: [{ kind: 'increment-state', target: { scope: { kind: 'world' }, key: 'undeclared' }, amount: 1 }] },
+        },
+      } : node),
+    };
+    const initial = makeSnapshot(world);
+    const rejected = dispatchPlayerInput(world, initial, { kind: 'node-link', nodeId: 'room' });
+    expect(rejected.resolution.kind).toBe('invalid-node-link');
+    expect(rejected.snapshot).toBe(initial);
+    expect(rejected.snapshot.currentNodeId).toBe('start');
+    expect(rejected.snapshot.state.world['exits']).toBe(0);
+    expect(rejected.snapshot.nodeVisitCounts.room).toBe(0);
+  });
+
+  it('suspends dialogue on a node link and resumes it when returning to its node', () => {
+    const world = { ...tavernWorld, scripts: [] };
+    const initial = makeSnapshot(world, 'taproom');
+    const started = dispatchPlayerInput(world, initial, { kind: 'command-text', rawText: 'speak with Mira' });
+    expect(started.snapshot.activeConversation).toMatchObject({ conversationId: 'mira-story', lineId: 'mira-first' });
+
+    const left = dispatchPlayerInput(world, started.snapshot, { kind: 'node-link', nodeId: 'cellar' });
+    expect(left.resolution).toEqual({ kind: 'node-link', nodeId: 'cellar' });
+    expect(left.snapshot.activeConversation).toBeNull();
+    expect(left.snapshot.conversationStack).toEqual([{ conversationId: 'mira-story', lineId: 'mira-first', returnNodeId: 'taproom' }]);
+
+    const returned = dispatchPlayerInput(world, left.snapshot, { kind: 'node-link', nodeId: 'taproom' });
+    expect(returned.resolution).toEqual({ kind: 'node-link', nodeId: 'taproom' });
+    expect(returned.snapshot.activeConversation).toMatchObject({ conversationId: 'mira-story', lineId: 'mira-first' });
+    expect(returned.snapshot.conversationStack).toEqual([]);
+  });
+
   it('returns no-match, ambiguous, and invalid input without mutating state', () => {
     const world: WorldDocument = {
       ...smallWorld,

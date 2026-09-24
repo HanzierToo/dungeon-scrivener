@@ -733,6 +733,7 @@ export type ActionInput =
 
 export type PlayerInput =
   | { readonly kind: 'choice'; readonly actionId: ChoiceId }
+  | { readonly kind: 'node-link'; readonly nodeId: NodeId }
   | { readonly kind: 'command-text'; readonly rawText: string }
   | { readonly kind: 'dialogue-option'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId; readonly optionId: DialogueOptionId }
   | { readonly kind: 'inventory'; readonly operation: InventoryPlayerOperation };
@@ -755,6 +756,8 @@ export type CommandMatchResult =
 
 export type PlayerInputResolution =
   | { readonly kind: 'choice'; readonly actionId: ChoiceId }
+  | { readonly kind: 'node-link'; readonly nodeId: NodeId }
+  | { readonly kind: 'invalid-node-link'; readonly diagnostic: Diagnostic }
   | { readonly kind: 'dialogue-option'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId; readonly optionId: DialogueOptionId }
   | { readonly kind: 'dialogue-option-disabled'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId; readonly optionId: DialogueOptionId; readonly disabledReason: string }
   | { readonly kind: 'invalid-dialogue-option'; readonly diagnostic: Diagnostic }
@@ -873,6 +876,8 @@ export interface ValidatedAuthorStyle {
 export interface PortablePlayerArtifact {
   readonly format: 'dungeon-scrivener-portable-player';
   readonly schemaVersion: SchemaVersion;
+  /** Engine compatibility version of the prebuilt runtime. */
+  readonly engineVersion: string;
   /** Standalone HTML shell with the built-in classic runtime and one required data marker. */
   readonly indexHtml: Uint8Array;
 }
@@ -895,6 +900,8 @@ export interface EmbeddedPortableGameData {
   readonly scripts: CompiledScriptBundle;
   readonly authorStyle: ValidatedAuthorStyle;
   readonly media: readonly EmbeddedPortableMediaAsset[];
+  /** Built from the accepted project identity, content fingerprint, and player runtime version. */
+  readonly saveCompatibility: SaveCompatibilityTarget;
 }
 
 export interface ExportGameInput {
@@ -902,6 +909,8 @@ export interface ExportGameInput {
   readonly world: WorldDocument;
   readonly locales: readonly LocaleDocument[];
   readonly scripts: CompiledScriptBundle;
+  /** Successful fingerprint result for this exact playable project revision. */
+  readonly acceptedContentFingerprint: ContentFingerprint;
   /** Assets resolved and hash-verified through MediaAssetApi. */
   readonly media: readonly ResolvedMediaAsset[];
   readonly authorStyle: ValidatedAuthorStyle;

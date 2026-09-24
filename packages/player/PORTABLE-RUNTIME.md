@@ -33,7 +33,9 @@ Embed the serialized `PortableGameData` in a script element and load the artifac
 </script>
 ```
 
-`PortableGameData` contains `manifest`, `world`, `locales`, `compiledScripts`, and `sessionStart`. The host supplies `mediaAssets`; the runtime supplies the bundled script executor automatically. `startFromEmbeddedData` returns a handle with `getSnapshot()` and `unmount()`. `window.DungeonScrivenerPlayer` also exposes the engine API namespace, `Player`, and `EnginePlayer`. The executor is available at `window.DungeonScrivenerExecutor`.
+`PortableGameData` contains `manifest`, `world`, `locales`, `compiledScripts`, `sessionStart`, and the exporter's `saveCompatibility` target. The host supplies `mediaAssets`; the runtime supplies the bundled script executor automatically. `startFromEmbeddedData` returns a handle with `getSnapshot()` and `unmount()`. `window.DungeonScrivenerPlayer` also exposes the engine API namespace, `Player`, and `EnginePlayer`. The executor is available at `window.DungeonScrivenerExecutor`.
+
+Rendered node links dispatch the engine's `node-link` player input. When the world save policy enables slots, the Player shows Save and Load controls. Save creates and downloads the complete player-save ZIP through `@dungeon-scrivener/player-save`, including the current session and embedded compatibility target. Checkpoint-only policies reject saves away from an allowed node. Load decodes the ZIP, checks project, game, engine, and content-fingerprint compatibility, and verifies the slot is allowed before replacing the active snapshot. Decode, compatibility, policy, and download failures are shown in the Player; rejected loads leave the current session active.
 
 The host must resolve game assets from embedded data or another synchronous local mechanism. The runtime itself does not use `fetch`, dynamic imports, or a CDN.
 

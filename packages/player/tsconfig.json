@@ -12,6 +12,9 @@
     "paths": {
       "@dungeon-scrivener/engine": [
         "../engine/src/index.ts"
+      ],
+      "@dungeon-scrivener/player-save": [
+        "../player-save/src/index.ts"
       ]
     }
   },

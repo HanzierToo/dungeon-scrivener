@@ -9,9 +9,11 @@ import type {
   ResolvedMediaAsset,
 } from '@dungeon-scrivener/model';
 
-const GAME_DATA_OPEN = '<script id="game-data" type="application/json">';
+const GAME_DATA_MARKER = '<!--DUNGEON_SCRIVENER_EMBEDDED_GAME_DATA-->';
+const GAME_DATA_OPEN = '<script type="application/json" id="dungeon-scrivener-game-data">';
 const GAME_DATA_CLOSE = '</script>';
 const SHA256_PATTERN = /^sha256:([a-f0-9]{64})$/u;
+const ENGINE_VERSION_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/u;
 const MIME_EXTENSIONS: Readonly<Record<string, string>> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -108,12 +110,8 @@ function validateScriptBundle(input: ExportGameInput): Diagnostic[] {
 }
 
 function injectGameData(shell: string, data: EmbeddedPortableGameData): string | undefined {
-  const openCount = shell.split(GAME_DATA_OPEN).length - 1;
-  if (openCount !== 1) return undefined;
-  const start = shell.indexOf(GAME_DATA_OPEN) + GAME_DATA_OPEN.length;
-  const end = shell.indexOf(GAME_DATA_CLOSE, start);
-  if (end < 0 || shell.indexOf(GAME_DATA_OPEN, start) >= 0) return undefined;
-  return `${shell.slice(0, start)}${safeJson(data)}${shell.slice(end)}`;
+  if (shell.split(GAME_DATA_MARKER).length - 1 !== 1) return undefined;
+  return shell.replace(GAME_DATA_MARKER, `${GAME_DATA_OPEN}${safeJson(data)}${GAME_DATA_CLOSE}`);
 }
 
 function hasExternalDocumentDependency(html: string): boolean {
@@ -123,7 +121,7 @@ function hasExternalDocumentDependency(html: string): boolean {
 function addBootstrap(html: string): string | undefined {
   const closingBody = html.toLowerCase().lastIndexOf('</body>');
   if (closingBody < 0) return undefined;
-  const bootstrap = `<script>(function(){\n  'use strict';\n  var bundle=window.DungeonScrivenerPlayer;\n  var runtime=bundle&&(bundle.portablePlayerRuntime||bundle);\n  if(!runtime||!runtime.startFromEmbeddedData)throw new Error('Portable player runtime is unavailable.');\n  var data=JSON.parse(document.getElementById('game-data').textContent||'null');\n  if(!data||data.format!=='dungeon-scrivener-embedded-game-data'||!Array.isArray(data.media)||!data.scripts)throw new Error('Embedded game data is malformed or incomplete.');\n  var assets=new Map();\n  data.media.forEach(function(item){var raw=atob(item.base64),bytes=new Uint8Array(raw.length);for(var i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);assets.set(item.assetId,{bytes:bytes,mediaType:item.mediaType,byteLength:item.byteLength});});\n  var mediaAssets={resolveAsset:function(id){var asset=assets.get(id);return asset?{ok:true,asset:Object.assign({assetId:id},asset)}:{ok:false,diagnostic:{code:'DS-MEDIA-MISSING',severity:'error',message:'The referenced game asset is missing.',blocks:['play']}};}};\n  runtime.startFromEmbeddedData(document.getElementById('player-root'),{manifest:data.manifest,world:data.world,locales:data.locales,compiledScripts:data.scripts,sessionStart:{wallClockEpochMilliseconds:Date.now(),visibility:document.visibilityState==='hidden'?'hidden':'visible',focused:document.hasFocus()}},{factory:runtime.engine,host:{mediaAssets:mediaAssets},themeCss:data.authorStyle.cssText});\n})();</script>`;
+  const bootstrap = `<script>(function(){\n  'use strict';\n  var bundle=window.DungeonScrivenerPlayer;\n  var runtime=bundle&&(bundle.portablePlayerRuntime||bundle);\n  if(!runtime||!runtime.startFromEmbeddedData)throw new Error('Portable player runtime is unavailable.');\n  var data=JSON.parse(document.getElementById('dungeon-scrivener-game-data').textContent||'null');\n  if(!data||data.format!=='dungeon-scrivener-embedded-game-data'||!Array.isArray(data.media)||!data.scripts||!data.saveCompatibility)throw new Error('Embedded game data is malformed or incomplete.');\n  var assets=new Map();\n  data.media.forEach(function(item){var raw=atob(item.base64),bytes=new Uint8Array(raw.length);for(var i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);assets.set(item.assetId,{bytes:bytes,mediaType:item.mediaType,byteLength:item.byteLength});});\n  var mediaAssets={resolveAsset:function(id){var asset=assets.get(id);return asset?{ok:true,asset:Object.assign({assetId:id},asset)}:{ok:false,diagnostic:{code:'DS-MEDIA-MISSING',severity:'error',message:'The referenced game asset is missing.',blocks:['play']}};}};\n  runtime.startFromEmbeddedData(document.getElementById('player-root'),{manifest:data.manifest,world:data.world,locales:data.locales,compiledScripts:data.scripts,sessionStart:{wallClockEpochMilliseconds:Date.now(),visibility:document.visibilityState==='hidden'?'hidden':'visible',focused:document.hasFocus()},saveCompatibility:data.saveCompatibility},{factory:runtime.engine,host:{mediaAssets:mediaAssets},themeCss:data.authorStyle.cssText,saveCompatibility:data.saveCompatibility});\n})();</script>`;
   return `${html.slice(0, closingBody)}${bootstrap}${html.slice(closingBody)}`;
 }
 
@@ -137,8 +135,15 @@ export async function exportGame(input: ExportGameInput): Promise<ExportGameResu
   }
   if (!Array.isArray(input.locales) || !Array.isArray(input.media) ||
       input.authorStyle?.cssText === undefined || input.player?.format !== 'dungeon-scrivener-portable-player' ||
-      input.player.schemaVersion !== 1 || !(input.player.indexHtml instanceof Uint8Array)) {
+      input.player.schemaVersion !== 1 || !(input.player.indexHtml instanceof Uint8Array) ||
+      !ENGINE_VERSION_PATTERN.test(input.player.engineVersion)) {
     return failure(error('DS-EXPORT-INPUT', 'Portable export inputs do not match the v1 contract.'));
+  }
+  const fingerprint = input.acceptedContentFingerprint;
+  if (fingerprint?.format !== 'dungeon-scrivener-content-fingerprint' || fingerprint.schemaVersion !== 1 ||
+      fingerprint.algorithm !== 'sha-256' || fingerprint.scope !== 'playable-files-v1' ||
+      !SHA256_PATTERN.test(fingerprint.digest) || !Array.isArray(fingerprint.files) || fingerprint.files.length < 2) {
+    return failure(error('DS-EXPORT-FINGERPRINT', 'The accepted playable-content fingerprint is malformed.'));
   }
   diagnostics.push(...validateScriptBundle(input));
   const assets = new Map<string, ResolvedMediaAsset>();
@@ -185,9 +190,14 @@ export async function exportGame(input: ExportGameInput): Promise<ExportGameResu
     scripts: input.scripts,
     authorStyle: input.authorStyle,
     media: embeddedAssets,
+    saveCompatibility: {
+      manifest: { projectId: input.manifest.projectId, gameVersion: input.manifest.gameVersion },
+      engineVersion: input.player.engineVersion,
+      contentFingerprint: fingerprint.digest,
+    },
   };
   let html = injectGameData(shell, data);
-  if (!html) return failure(error('DS-EXPORT-PLAYER', 'Portable player shell must contain exactly one empty game-data script marker.'));
+  if (!html) return failure(error('DS-EXPORT-PLAYER', 'Portable player shell must contain exactly one embedded-game-data marker.'));
   html = addBootstrap(html) ?? '';
   if (!html) return failure(error('DS-EXPORT-PLAYER', 'Portable player shell must contain a closing body element.'));
 

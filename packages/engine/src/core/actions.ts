@@ -359,6 +359,58 @@ function navigate(context: ActionContext, edgeId: string, source: TraceSource, r
   return applyRuleTransition(context, processRulePhase(context.world, context.snapshot, rulePhase, source, reason, context.scriptTransaction));
 }
 
+function navigateToNode(context: ActionContext, nodeId: string, source: TraceSource, reason: string, depth: number): boolean {
+  const fromNodeId = context.snapshot.currentNodeId;
+  const target = context.world.nodes.find((node) => node.id === nodeId);
+  if (!target || !target.visitable || nodeId === fromNodeId) {
+    fail(context, INVALID_NAVIGATION, `Node-link target ${nodeId} is missing, nonvisitable, or already current.`);
+    return false;
+  }
+  const fromVisits = context.snapshot.nodeVisitCounts[fromNodeId] ?? 0;
+  const previousVisits = context.snapshot.nodeVisitCounts[target.id] ?? 0;
+  if (previousVisits >= Number.MAX_SAFE_INTEGER) {
+    fail(context, BUDGET_EXCEEDED, `Visit count for node ${target.id} exceeds the safe integer limit.`);
+    return false;
+  }
+
+  const suspended = suspendForNavigation(context.snapshot, source, reason);
+  if (!addTransitionTrace(context, suspended.trace)) {
+    fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+    return false;
+  }
+  if (suspended.diagnostics.length > 0) {
+    context.diagnostics.push(...suspended.diagnostics);
+    return false;
+  }
+  context.snapshot = suspended.snapshot;
+
+  if (!runLifecycle(context, fromNodeId, 'exit', source, reason, depth, Math.max(0, fromVisits - 1))) return false;
+  const exitEvents = context.events.splice(0);
+  const exited = processRulePhase(context.world, context.snapshot, 'node-exit', source, reason, context.scriptTransaction, exitEvents);
+  if (!applyRuleTransition(context, exited)) return false;
+  if (context.snapshot.currentNodeId !== fromNodeId) {
+    fail(context, INVALID_NAVIGATION, `Exit effects changed the current node before node-link target ${nodeId} was applied.`);
+    return false;
+  }
+
+  const phase = previousVisits === 0 ? 'entry' : 'revisit';
+  context.didNavigate = true;
+  context.snapshot = {
+    ...context.snapshot,
+    currentNodeId: target.id,
+    nodeVisitCounts: { ...context.snapshot.nodeVisitCounts, [target.id]: previousVisits + 1 },
+  };
+  if (!addTrace(context, { kind: 'node-transition', source, reason, fromNodeId, toNodeId: target.id })) {
+    fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+    return false;
+  }
+  if (!runLifecycle(context, target.id, phase, source, reason, depth, phase === 'entry' ? previousVisits : Math.max(0, previousVisits - 1))) return false;
+  const entryEvents = context.events.splice(0);
+  const rulePhase = phase === 'entry' ? 'node-entry' : 'node-revisit';
+  const entered = processRulePhase(context.world, context.snapshot, rulePhase, source, reason, context.scriptTransaction, entryEvents);
+  return applyRuleTransition(context, entered);
+}
+
 function scriptOrigin(source: TraceSource): ScriptInvocationOrigin | undefined {
   switch (source.kind) {
     case 'action': return { kind: 'action', actionId: source.actionId };
@@ -498,6 +550,21 @@ function finishAction(context: ActionContext, advanceTime = true): TransitionRes
     if (rules.diagnostics.diagnostics.length > 0) return transition(context.original, context.trace, rules.diagnostics.diagnostics);
     context.snapshot = rules.snapshot;
   }
+  if (context.didNavigate) {
+    const resumed = resumeOnReturn(
+      context.world, context.snapshot, { kind: 'engine', operation: 'resume-conversation-on-return' },
+      (condition, current, event) => evaluateConditionValue(context.world, current, condition, event),
+    );
+    if (!addTransitionTrace(context, resumed.trace)) {
+      fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+      return transition(context.original, context.trace, context.diagnostics);
+    }
+    if (resumed.diagnostics.diagnostics.length > 0) {
+      context.diagnostics.push(...resumed.diagnostics.diagnostics);
+      return transition(context.original, context.trace, context.diagnostics);
+    }
+    context.snapshot = resumed.snapshot;
+  }
   if (!advanceTime) return transition(context.snapshot, context.trace, context.diagnostics);
   const timeAdvance = advanceActionTime(
     context.world,
@@ -517,21 +584,6 @@ function finishAction(context: ActionContext, advanceTime = true): TransitionRes
   if (timeAdvanced) {
     const timedRules = processRulePhase(context.world, context.snapshot, 'time-advanced', { kind: 'engine', operation: 'action-time-advanced' }, 'Per-action game time advanced.', context.scriptTransaction);
     if (!applyRuleTransition(context, timedRules)) return transition(context.original, context.trace, context.diagnostics);
-  }
-  if (context.didNavigate) {
-    const resumed = resumeOnReturn(
-      context.world, context.snapshot, { kind: 'engine', operation: 'resume-conversation-on-return' },
-      (condition, current, event) => evaluateConditionValue(context.world, current, condition, event),
-    );
-    if (!addTransitionTrace(context, resumed.trace)) {
-      fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
-      return transition(context.original, context.trace, context.diagnostics);
-    }
-    if (resumed.diagnostics.diagnostics.length > 0) {
-      context.diagnostics.push(...resumed.diagnostics.diagnostics);
-      return transition(context.original, context.trace, context.diagnostics);
-    }
-    context.snapshot = resumed.snapshot;
   }
   return transition(context.snapshot, context.trace, context.diagnostics);
 }
@@ -657,6 +709,30 @@ function dispatchInventoryInput(world: WorldDocument, snapshot: SessionSnapshot,
 export function dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnapshot, input: PlayerInput, scriptEnvironment?: ScriptExecutionEnvironment): PlayerInputTransitionResult {
   const scriptDiagnosticResult = scriptEnvironment ? validateScriptEnvironment(world, scriptEnvironment)[0] : undefined;
   if (scriptDiagnosticResult) return inputTransition(snapshot, { kind: 'invalid-input', diagnostic: scriptDiagnosticResult }, transition(snapshot, [], [scriptDiagnosticResult]));
+  if (input.kind === 'node-link') {
+    const target = world.nodes.find((node) => node.id === input.nodeId);
+    if (!target || !target.visitable || input.nodeId === snapshot.currentNodeId) {
+      const diagnostic = issue(INVALID_NAVIGATION, `Node-link target ${input.nodeId} is missing, nonvisitable, or already current.`);
+      const source: TraceSource = { kind: 'action', actionId: `node-link-${input.nodeId}` };
+      const rejected = transition(snapshot, [{
+        sequence: 0, kind: 'diagnostic', source, reason: diagnostic.message, diagnosticCode: diagnostic.code,
+      }], [diagnostic]);
+      return inputTransition(snapshot, { kind: 'invalid-node-link', diagnostic }, rejected);
+    }
+    const source: TraceSource = { kind: 'action', actionId: `node-link-${target.id}` };
+    const reason = `Player followed the node link to ${target.id}.`;
+    const context: ActionContext = {
+      world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false,
+      scriptTransaction: createScriptActionTransaction(scriptEnvironment),
+    };
+    addTrace(context, { kind: 'action', source, reason });
+    navigateToNode(context, target.id, source, reason, 0);
+    const result = finishAction(context);
+    const failure = result.diagnostics.diagnostics[0];
+    return failure
+      ? inputTransition(snapshot, { kind: 'invalid-node-link', diagnostic: failure }, result)
+      : inputTransition(snapshot, { kind: 'node-link', nodeId: target.id }, result);
+  }
   if (input.kind === 'inventory') return dispatchInventoryInput(world, snapshot, input.operation, scriptEnvironment);
   if (input.kind === 'choice') {
     const choice = actionSets(world, snapshot).choices.find((candidate) => candidate.id === input.actionId);
