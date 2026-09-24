@@ -571,6 +571,9 @@
             "disable"
           ]
         },
+        "disabledReason": {
+          "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/textSource"
+        },
         "nextLineId": {
           "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
         },
@@ -702,6 +705,7 @@
     "initialItemStack": {
       "type": "object",
       "properties": {
+        "id": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "owner": {
           "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/stateScope"
         },
@@ -712,7 +716,7 @@
           "type": "integer",
           "minimum": 1
         },
-        "containerItemId": {
+        "containerStackId": {
           "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
         },
         "fields": {
@@ -720,6 +724,7 @@
         }
       },
       "required": [
+        "id",
         "owner",
         "itemId",
         "quantity",
@@ -1033,6 +1038,7 @@
     },
     "initialInventory": {
       "type": "array",
+      "maxItems": 10000,
       "items": {
         "$ref": "#/$defs/initialItemStack"
       }

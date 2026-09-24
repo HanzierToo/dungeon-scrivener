@@ -467,15 +467,30 @@
                 "key": "option-claim-key"
               },
               "condition": {
-                "kind": "compare-state",
-                "left": {
-                  "scope": {
-                    "kind": "world"
+                "kind": "all",
+                "conditions": [
+                  {
+                    "kind": "compare-state",
+                    "left": {
+                      "scope": {
+                        "kind": "world"
+                      },
+                      "key": "trust"
+                    },
+                    "operator": "gte",
+                    "right": 1
                   },
-                  "key": "trust"
-                },
-                "operator": "gte",
-                "right": 1
+                  {
+                    "kind": "has-seen-line",
+                    "conversationId": "rowan-story",
+                    "lineId": "rowan-secret"
+                  },
+                  {
+                    "kind": "has-selected-dialogue-option",
+                    "conversationId": "rowan-story",
+                    "optionId": "tell-secret"
+                  }
+                ]
               },
               "falsePolicy": "hide",
               "nextLineId": "mira-farewell",
@@ -495,6 +510,28 @@
               "text": {
                 "kind": "locale-key",
                 "key": "option-decline-key"
+              },
+              "nextLineId": "mira-farewell",
+              "effects": []
+            },
+            {
+              "id": "show-key",
+              "text": {
+                "kind": "literal",
+                "text": "Show me the key"
+              },
+              "condition": {
+                "kind": "has-item",
+                "owner": {
+                  "kind": "world"
+                },
+                "itemId": "silver-key",
+                "quantity": 1
+              },
+              "falsePolicy": "disable",
+              "disabledReason": {
+                "kind": "locale-key",
+                "key": "disabled-reason-key-needed"
               },
               "nextLineId": "mira-farewell",
               "effects": []

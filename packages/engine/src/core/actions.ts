@@ -7,6 +7,7 @@ import type {
 import { evaluateConditionValue, processEventQueue, processRulePhase, shouldRunLifecycleEffects } from './rules.js';
 import { reduceEffects } from './state.js';
 import { advanceActionTime } from './time.js';
+import { applyInventoryEffect, inventoryOperationEffect } from '../inventory/index.js';
 
 const MAX_EFFECTS_PER_ACTION = 10_000;
 const MAX_TRACE_RECORDS = 20_000;
@@ -313,6 +314,21 @@ function runEffects(context: ActionContext, effects: readonly Effect[], source: 
       context.events.push({ eventId: effect.eventId, payload: effect.payload, source: source.kind === 'action' ? `action:${source.actionId}` : `${source.kind}:${'ruleId' in source ? source.ruleId : 'lifecycle'}` });
       continue;
     }
+    if (effect.kind === 'use-item') {
+      if (!addTrace(context, { kind: 'effect-request', source, reason, effect: structuredClone(effect) })) {
+        fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+        return false;
+      }
+      const used = applyInventoryEffect(context.world, context.snapshot, effect);
+      if (!used.ok || !used.event) {
+        context.diagnostics.push(...(used.diagnostics.length > 0 ? used.diagnostics : [issue(INVALID_ACTION, 'Inventory use did not produce its declared event.')]));
+        addTrace(context, { kind: 'diagnostic', source, reason: context.diagnostics.at(-1)!.message, diagnosticCode: context.diagnostics.at(-1)!.code });
+        return false;
+      }
+      context.snapshot = used.snapshot;
+      context.events.push(used.event);
+      continue;
+    }
     if (effect.kind === 'navigate') {
       if (!addTrace(context, { kind: 'effect-request', source, reason, effect: structuredClone(effect) })) {
         fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
@@ -449,7 +465,32 @@ function inputTransition(snapshot: SessionSnapshot, resolution: PlayerInputResol
   return Object.freeze({ ...transitionResult, resolution });
 }
 
+function dispatchInventoryInput(world: WorldDocument, snapshot: SessionSnapshot, operation: Extract<PlayerInput, { kind: 'inventory' }>['operation']): PlayerInputTransitionResult {
+  const effect = inventoryOperationEffect(operation);
+  if (!effect) {
+    const diagnostic = issue(INVALID_INPUT, 'Inventory input does not match a supported operation shape.');
+    return inputTransition(snapshot, { kind: 'invalid-inventory-input', diagnostic }, transition(snapshot, [], [diagnostic]));
+  }
+  const actionId = `inventory-${operation.kind}`;
+  const source: TraceSource = { kind: 'action', actionId };
+  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0 };
+  addTrace(context, { kind: 'action', source, reason: `Player requested inventory operation ${operation.kind}.` });
+  if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Inventory ${operation.kind} starts.`))) {
+    const result = finishAction(context);
+    return inputTransition(snapshot, { kind: 'invalid-inventory-input', diagnostic: result.diagnostics.diagnostics[0]! }, result);
+  }
+  if (!runEffects(context, [effect], source, `Inventory ${operation.kind} operation.`, 0)) {
+    const result = finishAction(context);
+    return inputTransition(snapshot, { kind: 'invalid-inventory-input', diagnostic: result.diagnostics.diagnostics[0]! }, result);
+  }
+  const result = finishAction(context);
+  const diagnostic = result.diagnostics.diagnostics[0];
+  if (diagnostic) return inputTransition(snapshot, { kind: 'invalid-inventory-input', diagnostic }, result);
+  return inputTransition(snapshot, { kind: 'inventory', operation }, result);
+}
+
 export function dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnapshot, input: PlayerInput): PlayerInputTransitionResult {
+  if (input.kind === 'inventory') return dispatchInventoryInput(world, snapshot, input.operation);
   if (input.kind === 'choice') {
     const choice = actionSets(world, snapshot).choices.find((candidate) => candidate.id === input.actionId);
     if (choice && choice.falsePolicy === 'disable') {
@@ -463,6 +504,10 @@ export function dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnaps
     const diagnostic = result.diagnostics.diagnostics[0];
     if (diagnostic) return inputTransition(snapshot, { kind: 'invalid-input', diagnostic }, result);
     return inputTransition(snapshot, { kind: 'choice', actionId: input.actionId }, result);
+  }
+  if (input.kind === 'dialogue-option') {
+    const diagnostic = issue(INVALID_INPUT, 'Dialogue-option dispatch is not implemented by this engine task.');
+    return inputTransition(snapshot, { kind: 'invalid-dialogue-option', diagnostic }, transition(snapshot, [], [diagnostic]));
   }
   const matched = matchCommandText(world, snapshot, input.rawText);
   if (matched.kind === 'invalid-input') return inputTransition(snapshot, matched, transition(snapshot, [], [matched.diagnostic]));

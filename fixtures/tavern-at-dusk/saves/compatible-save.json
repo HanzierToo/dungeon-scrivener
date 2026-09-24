@@ -4,7 +4,7 @@
   "projectId": "tavern-at-dusk",
   "gameVersion": "1.0.0",
   "engineVersion": "1.0.0",
-  "contentFingerprint": "sha256:8d7e9d954fde3a44ad3b6938b4e8563b0e3aa3203f8f984e5e987e19f0aa0ad6",
+  "contentFingerprint": "sha256:eba68a00f286dd699b6ff737954115d5601c79087b7952c6d8559d8016089897",
   "slotId": "evening",
   "savedAt": "2026-09-23T00:00:00.000Z",
   "session": {
@@ -34,6 +34,16 @@
       "cellar": 1
     },
     "conversationStack": [],
+    "dialogueHistory": [
+      { "kind": "line-seen", "conversationId": "mira-story", "lineId": "mira-first" },
+      { "kind": "line-seen", "conversationId": "rowan-story", "lineId": "rowan-first" },
+      { "kind": "option-selected", "conversationId": "rowan-story", "lineId": "rowan-first", "optionId": "tell-secret" },
+      { "kind": "line-seen", "conversationId": "rowan-story", "lineId": "rowan-secret" },
+      { "kind": "option-selected", "conversationId": "rowan-story", "lineId": "rowan-secret", "optionId": "return-to-mira" },
+      { "kind": "line-seen", "conversationId": "mira-story", "lineId": "mira-after-return" },
+      { "kind": "option-selected", "conversationId": "mira-story", "lineId": "mira-after-return", "optionId": "claim-silver-key" },
+      { "kind": "line-seen", "conversationId": "mira-story", "lineId": "mira-farewell" }
+    ],
     "gameTimeMilliseconds": 120000,
     "randomInitialSeed": null,
     "randomSeed": null,
@@ -51,6 +61,7 @@
     "ruleGuards": {},
     "inventory": [
       {
+        "id": "stack-0",
         "owner": {
           "kind": "world"
         },
@@ -59,6 +70,7 @@
         "fields": {}
       }
     ],
+    "nextInventoryStackOrdinal": 1,
     "randomnessMode": "unseeded",
     "entityTags": {
       "cellar-rowan": [

@@ -11,7 +11,9 @@ export type ChoiceId = StableId;
 export type CommandId = StableId;
 export type ConversationId = StableId;
 export type DialogueLineId = StableId;
+export type DialogueOptionId = StableId;
 export type ItemId = StableId;
+export type InventoryStackId = StableId;
 export type ScriptId = StableId;
 export type LocaleKey = StableId;
 export type StateKey = StableId;
@@ -75,6 +77,9 @@ export type Condition =
   | { readonly kind: 'not'; readonly condition: Condition }
   | { readonly kind: 'compare-state'; readonly left: StateReference; readonly operator: ComparisonOperator; readonly right: Scalar }
   | { readonly kind: 'has-tag'; readonly entityId: EntityId; readonly tag: string }
+  | { readonly kind: 'has-seen-line'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId }
+  | { readonly kind: 'has-selected-dialogue-option'; readonly conversationId: ConversationId; readonly optionId: DialogueOptionId }
+  | { readonly kind: 'has-item'; readonly owner: StateScope; readonly itemId: ItemId; readonly quantity: number }
   | { readonly kind: 'at-node'; readonly nodeId: NodeId }
   | { readonly kind: 'event-is'; readonly eventId: EventId }
   | { readonly kind: 'time-at-least'; readonly milliseconds: number };
@@ -87,7 +92,11 @@ export type Effect =
   | { readonly kind: 'add-tag' | 'remove-tag'; readonly entityId: EntityId; readonly tag: string }
   | { readonly kind: 'emit-event'; readonly eventId: EventId; readonly payload: JsonRecord }
   | { readonly kind: 'navigate'; readonly edgeId: StableId }
-  | { readonly kind: 'add-item' | 'remove-item'; readonly owner: StateScope; readonly itemId: ItemId; readonly quantity: number }
+  | { readonly kind: 'add-item'; readonly owner: StateScope; readonly itemId: ItemId; readonly quantity: number; readonly containerStackId?: InventoryStackId; readonly fields?: ScalarRecord }
+  | { readonly kind: 'remove-item'; readonly stackId: InventoryStackId; readonly quantity: number }
+  | { readonly kind: 'use-item'; readonly stackId: InventoryStackId }
+  | { readonly kind: 'transfer-item'; readonly stackId: InventoryStackId; readonly quantity: number; readonly destination: InventoryLocation }
+  | { readonly kind: 'equip-item' | 'unequip-item'; readonly stackId: InventoryStackId; readonly slotId: StableId }
   | { readonly kind: 'start-conversation' | 'interrupt-conversation' | 'resume-conversation'; readonly conversationId: ConversationId }
   | { readonly kind: 'run-script'; readonly scriptId: ScriptId };
 
@@ -199,10 +208,11 @@ export interface RuleDefinition {
 }
 
 export interface DialogueOption {
-  readonly id: StableId;
+  readonly id: DialogueOptionId;
   readonly text: TextSource;
   readonly condition?: Condition;
   readonly falsePolicy?: 'hide' | 'disable';
+  readonly disabledReason?: TextSource;
   readonly nextLineId?: DialogueLineId;
   readonly effects: readonly Effect[];
 }
@@ -236,13 +246,20 @@ export interface ItemDefinition {
 }
 
 export interface InventoryStack {
+  readonly id: InventoryStackId;
   readonly owner: StateScope;
   readonly itemId: ItemId;
   readonly quantity: number;
-  readonly containerItemId?: ItemId;
+  readonly containerStackId?: InventoryStackId;
   readonly equippedSlot?: StableId;
   readonly fields: ScalarRecord;
 }
+
+export interface InventoryLocation {
+  readonly owner: StateScope;
+  readonly containerStackId?: InventoryStackId;
+}
+
 
 export interface TimeSettings {
   readonly mode: 'per-action' | 'elapsed';
@@ -441,16 +458,30 @@ export interface PlayerDialogueView {
   readonly speakerEntityId: EntityId;
   readonly speakerName: string;
   readonly text: string;
-  readonly options: readonly PlayerChoiceView[];
+  readonly options: readonly PlayerDialogueOptionView[];
   readonly canResume: boolean;
 }
 
+export interface PlayerDialogueOptionView {
+  readonly id: DialogueOptionId;
+  readonly label: string;
+  readonly enabled: boolean;
+  readonly disabledReason?: string;
+}
+
+
+
 export interface PlayerInventoryItemView {
+  readonly stackId: InventoryStackId;
   readonly itemId: ItemId;
+  readonly owner: StateScope;
   readonly label: string;
   readonly quantity: number;
-  readonly containerItemId?: ItemId;
+  readonly containerStackId?: InventoryStackId;
+  /** Slot supported by the item definition, when equippable. */
   readonly equipmentSlot?: StableId;
+  /** Slot currently occupied by this stack. */
+  readonly equippedSlot?: StableId;
   readonly fields: ScalarRecord;
 }
 
@@ -580,8 +611,11 @@ export interface SavedConversationContext {
   readonly conversationId: ConversationId;
   readonly lineId: DialogueLineId;
   readonly returnNodeId: NodeId;
-  readonly historyLineIds: readonly DialogueLineId[];
 }
+
+export type DialogueHistoryEntry =
+  | { readonly kind: 'line-seen'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId }
+  | { readonly kind: 'option-selected'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId; readonly optionId: DialogueOptionId };
 
 export interface SavedSessionState {
   readonly currentNodeId: NodeId;
@@ -592,6 +626,8 @@ export interface SavedSessionState {
   };
   readonly nodeVisitCounts: Readonly<Record<NodeId, number>>;
   readonly conversationStack: readonly SavedConversationContext[];
+  /** Chronological session ledger; completion and interruption never remove entries. */
+  readonly dialogueHistory: readonly DialogueHistoryEntry[];
   readonly gameTimeMilliseconds: number;
   readonly randomnessMode: RandomnessMode;
   /** Normalized seed used to initialize the session; null in unseeded mode. */
@@ -604,6 +640,7 @@ export interface SavedSessionState {
   readonly clockState: ClockState;
   readonly ruleGuards: Readonly<Record<RuleId, boolean>>;
   readonly inventory: readonly InventoryStack[];
+  readonly nextInventoryStackOrdinal: number;
 }
 
 export interface PlayerSaveArchive {
@@ -634,7 +671,15 @@ export type ActionInput =
 
 export type PlayerInput =
   | { readonly kind: 'choice'; readonly actionId: ChoiceId }
-  | { readonly kind: 'command-text'; readonly rawText: string };
+  | { readonly kind: 'command-text'; readonly rawText: string }
+  | { readonly kind: 'dialogue-option'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId; readonly optionId: DialogueOptionId }
+  | { readonly kind: 'inventory'; readonly operation: InventoryPlayerOperation };
+
+export type InventoryPlayerOperation =
+  | { readonly kind: 'use'; readonly stackId: InventoryStackId }
+  | { readonly kind: 'transfer'; readonly stackId: InventoryStackId; readonly quantity: number; readonly destination: InventoryLocation }
+  | { readonly kind: 'equip'; readonly stackId: InventoryStackId; readonly slotId: StableId }
+  | { readonly kind: 'unequip'; readonly stackId: InventoryStackId; readonly slotId: StableId };
 
 export type CommandMatchResult =
   | {
@@ -648,6 +693,11 @@ export type CommandMatchResult =
 
 export type PlayerInputResolution =
   | { readonly kind: 'choice'; readonly actionId: ChoiceId }
+  | { readonly kind: 'dialogue-option'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId; readonly optionId: DialogueOptionId }
+  | { readonly kind: 'dialogue-option-disabled'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId; readonly optionId: DialogueOptionId; readonly disabledReason: string }
+  | { readonly kind: 'invalid-dialogue-option'; readonly diagnostic: Diagnostic }
+  | { readonly kind: 'inventory'; readonly operation: InventoryPlayerOperation }
+  | { readonly kind: 'invalid-inventory-input'; readonly diagnostic: Diagnostic }
   | { readonly kind: 'command'; readonly action: Extract<ActionInput, { readonly kind: 'command' }>; readonly normalizedText: string }
   | { readonly kind: 'no-match'; readonly normalizedText: string }
   | { readonly kind: 'ambiguous'; readonly commandIds: readonly CommandId[]; readonly normalizedText: string }
@@ -852,6 +902,13 @@ export interface GameEngineApi {
   observeClock(world: WorldDocument, snapshot: SessionSnapshot, input: ClockInput): TransitionResult;
   /** Engine-level dispatch for already-resolved choices and command captures. */
   dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, input: ActionInput): TransitionResult;
+  projectDialogueView(
+    manifest: Pick<ProjectManifest, 'defaultLocale'>,
+    world: WorldDocument,
+    locales: readonly LocaleDocument[],
+    snapshot: SessionSnapshot,
+    requestedLocale?: LocaleTag
+  ): PlayerDialogueView | undefined;
   getPlayerView(
     manifest: ProjectManifest,
     world: WorldDocument,

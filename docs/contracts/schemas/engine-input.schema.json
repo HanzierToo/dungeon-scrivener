@@ -28,28 +28,7 @@
       "required": ["kind", "wallClockEpochMilliseconds", "visibility", "focused"],
       "additionalProperties": false
     },
-    "playerInput": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "kind": { "const": "choice" },
-            "actionId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }
-          },
-          "required": ["kind", "actionId"],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": { "const": "command-text" },
-            "rawText": { "type": "string", "maxLength": 1024 }
-          },
-          "required": ["kind", "rawText"],
-          "additionalProperties": false
-        }
-      ]
-    }
+    "playerInput": { "$ref": "urn:dungeon-scrivener:schema:v1:player-input" }
   },
   "required": ["format", "schemaVersion", "sessionStart", "clockInput", "playerInput"],
   "additionalProperties": false

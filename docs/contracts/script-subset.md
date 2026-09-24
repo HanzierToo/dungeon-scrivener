@@ -46,7 +46,7 @@ The only non-local name besides `len` is the fixed `api` capability object. Only
 | --- | --- | --- |
 | `api.read(scope, key)` | `StateScope × StateKey -> Scalar` | Read a declared world, node, or entity value. Missing/unknown values produce a runtime diagnostic. |
 | `api.hasTag(entityId, tag)` | `EntityId × string -> boolean` | Read the entity's mutable session tag set, including authored initial tags. |
-| `api.request(effect)` | `ScriptEffect -> void` | Submit one typed effect for engine validation. The script cannot write state directly or request `run-script`. |
+| `api.request(effect)` | `ScriptEffect -> void` | Submit one typed effect for engine validation, including stack-addressed `remove-item`, `use-item`, `transfer-item`, `equip-item`, and `unequip-item`. `add-item` creates a distinct stack and may target a `containerStackId`. The script cannot write state directly or request `run-script`. |
 | `api.emit(eventId, payload)` | `EventId × JSON object -> void` | Submit a declared event through the engine event queue. |
 | `api.randomInt(min, max)` | safe integer × safe integer -> safe integer | Inclusive bounds, with `min <= max` and at most `2^32` possible values; seeded and unseeded draws use rejection sampling, with at most 64 raw uint32 draws per request. |
 | `api.randomFloat()` | `void -> number` | Returns a uint32 divided by `2^32`, a binary64 value in `[0, 1)`; outcome is logged. |

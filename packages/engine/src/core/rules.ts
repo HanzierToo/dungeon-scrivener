@@ -3,6 +3,7 @@ import type {
   RuleDefinition, Scalar, SessionSnapshot, StateFieldDefinition, StateReference,
   TraceSource, TransitionResult, TransitionTraceRecord, ValueType, WorldDocument,
 } from '@dungeon-scrivener/model';
+import { applyInventoryEffect } from '../inventory/index.js';
 import { reduceEffects } from './state.js';
 
 const MAX_CONDITION_NODES = 10_000;
@@ -177,6 +178,26 @@ function evaluateCondition(condition: Condition, context: EvaluationContext): Ev
         if (!context.world.entities.some((entity) => entity.id === current.entityId)) throw new Error(`Condition references unknown entity ${current.entityId}.`);
         value = (context.snapshot.entityTags[current.entityId] ?? []).includes(current.tag);
         break;
+      case 'has-item': {
+        if (!context.world.itemDefinitions.some((item) => item.id === current.itemId)) throw new Error(`Condition references unknown item ${current.itemId}.`);
+        if (!Number.isSafeInteger(current.quantity) || current.quantity <= 0) throw new Error('Inventory condition quantity must be a positive safe integer.');
+        if (current.owner.kind === 'node') {
+          const nodeId = current.owner.ownerId;
+          if (!context.world.nodes.some((node) => node.id === nodeId)) throw new Error(`Condition references unknown inventory owner node ${nodeId}.`);
+        }
+        if (current.owner.kind === 'entity') {
+          const entityId = current.owner.ownerId;
+          if (!context.world.entities.some((entity) => entity.id === entityId)) throw new Error(`Condition references unknown inventory owner entity ${entityId}.`);
+        }
+        const ownerId = current.owner.kind === 'world' ? undefined : current.owner.ownerId;
+        const quantity = context.snapshot.inventory
+          .filter((stack) => stack.itemId === current.itemId && stack.owner.kind === current.owner.kind &&
+            (ownerId === undefined || ('ownerId' in stack.owner && stack.owner.ownerId === ownerId)))
+          .reduce((total, stack) => total + stack.quantity, 0);
+        if (!Number.isSafeInteger(quantity)) throw new RangeError('Inventory condition quantity exceeds the safe integer limit.');
+        value = quantity >= current.quantity;
+        break;
+      }
       case 'at-node':
         if (!context.world.nodes.some((node) => node.id === current.nodeId)) throw new Error(`Condition references unknown node ${current.nodeId}.`);
         value = context.snapshot.currentNodeId === current.nodeId;
@@ -189,6 +210,8 @@ function evaluateCondition(condition: Condition, context: EvaluationContext): Ev
         if (!Number.isSafeInteger(current.milliseconds) || current.milliseconds < 0) throw new Error('Condition contains an invalid game-time threshold.');
         value = context.snapshot.gameTimeMilliseconds >= current.milliseconds;
         break;
+      default:
+        throw new Error(`Condition ${current.kind} is not implemented by this engine task.`);
     }
     values.push(value);
   }
@@ -335,6 +358,16 @@ export function processEventQueue(
             if (failed) return failed;
             continue;
           }
+          if (effect.kind === 'use-item') {
+            if (trace.length >= MAX_TRACE_RECORDS - 1) return fail(BUDGET_EXCEEDED, `Transition trace exceeded the ${MAX_TRACE_RECORDS} record budget.`);
+            trace.push({ sequence: trace.length, kind: 'effect-request', source: ruleSource, reason: effectReason, effect: structuredClone(effect) });
+            const used = applyInventoryEffect(world, provisional, effect);
+            if (!used.ok || !used.event) return result(snapshot, trace, used.diagnostics.length > 0 ? used.diagnostics : [diagnostic(INVALID_EVENT, 'Inventory use did not produce its declared event.')]);
+            provisional = used.snapshot;
+            const failed = enqueue(used.event, ruleSource, effectReason);
+            if (failed) return failed;
+            continue;
+          }
           const reduced = reduceEffects(world, provisional, [effect], ruleSource, effectReason);
           provisional = reduced.snapshot;
           if (reduced.diagnostics.diagnostics.length > 0) {
@@ -400,6 +433,15 @@ export function processRulePhase(
           if (trace.length >= MAX_TRACE_RECORDS - 1) return fail(BUDGET_EXCEEDED, `Transition trace exceeded the ${MAX_TRACE_RECORDS} record budget.`);
           trace.push({ sequence: trace.length, kind: 'effect-request', source: ruleSource, reason: effectReason, effect: structuredClone(effect) });
           queuedEvents.push({ eventId: effect.eventId, payload: effect.payload, source: eventSource(ruleSource) });
+          continue;
+        }
+        if (effect.kind === 'use-item') {
+          if (trace.length >= MAX_TRACE_RECORDS - 1) return fail(BUDGET_EXCEEDED, `Transition trace exceeded the ${MAX_TRACE_RECORDS} record budget.`);
+          trace.push({ sequence: trace.length, kind: 'effect-request', source: ruleSource, reason: effectReason, effect: structuredClone(effect) });
+          const used = applyInventoryEffect(world, provisional, effect);
+          if (!used.ok || !used.event) return result(snapshot, trace, used.diagnostics.length > 0 ? used.diagnostics : [diagnostic(INVALID_EVENT, 'Inventory use did not produce its declared event.')]);
+          provisional = used.snapshot;
+          queuedEvents.push(used.event);
           continue;
         }
         const reduced = reduceEffects(world, provisional, [effect], ruleSource, effectReason);

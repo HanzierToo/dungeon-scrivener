@@ -1,0 +1,12 @@
+{
+  "name": "@dungeon-scrivener/scripting",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./ir": "./src/ir/index.ts"
+  },
+  "dependencies": {
+    "@dungeon-scrivener/model": "0.0.0"
+  }
+}

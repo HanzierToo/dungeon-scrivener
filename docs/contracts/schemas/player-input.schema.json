@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:player-input",
+  "title": "DungeonScrivener player input v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "choice" },
+        "actionId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }
+      },
+      "required": ["kind", "actionId"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "command-text" },
+        "rawText": { "type": "string", "maxLength": 1024 }
+      },
+      "required": ["kind", "rawText"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "dialogue-option" },
+        "conversationId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "lineId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "optionId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }
+      },
+      "required": ["kind", "conversationId", "lineId", "optionId"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "inventory" },
+        "operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": { "kind": { "const": "use" }, "stackId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" } },
+              "required": ["kind", "stackId"], "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "const": "transfer" },
+                "stackId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+                "quantity": { "type": "integer", "minimum": 1 },
+                "destination": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/inventoryLocation" }
+              },
+              "required": ["kind", "stackId", "quantity", "destination"], "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": { "kind": { "const": "equip" }, "stackId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }, "slotId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" } },
+              "required": ["kind", "stackId", "slotId"], "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": { "kind": { "const": "unequip" }, "stackId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }, "slotId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" } },
+              "required": ["kind", "stackId", "slotId"], "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": ["kind", "operation"],
+      "additionalProperties": false
+    }
+  ]
+}

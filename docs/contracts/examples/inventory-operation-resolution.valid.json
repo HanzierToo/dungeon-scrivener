@@ -1,0 +1,4 @@
+{
+  "kind": "inventory",
+  "operation": { "kind": "use", "stackId": "stack-0" }
+}

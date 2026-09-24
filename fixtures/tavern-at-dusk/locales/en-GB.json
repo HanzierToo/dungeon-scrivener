@@ -24,6 +24,7 @@
     "option-return-mira": "Go back to Mira",
     "option-claim-key": "Take the silver key",
     "option-decline-key": "Leave the key for now",
+    "disabled-reason-key-needed": "You need to carry the silver key.",
     "silver-key-name": "Silver key"
   }
 }

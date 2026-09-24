@@ -24,6 +24,7 @@
     "option-return-mira": "ミラのところへ戻る",
     "option-claim-key": "銀の鍵を受け取る",
     "option-decline-key": "今は鍵を置いておく",
+    "disabled-reason-key-needed": "銀の鍵を持っている必要があります。",
     "silver-key-name": "銀の鍵"
   }
 }

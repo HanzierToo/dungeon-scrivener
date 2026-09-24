@@ -9,23 +9,48 @@
       "properties": {
         "conversationId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "lineId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
-        "returnNodeId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
-        "historyLineIds": { "type": "array", "maxItems": 10000, "items": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" } }
+        "returnNodeId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }
       },
-      "required": ["conversationId", "lineId", "returnNodeId", "historyLineIds"],
+      "required": ["conversationId", "lineId", "returnNodeId"],
       "additionalProperties": false
+    },
+    "dialogueHistoryEntry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "line-seen" },
+            "conversationId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+            "lineId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }
+          },
+          "required": ["kind", "conversationId", "lineId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "option-selected" },
+            "conversationId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+            "lineId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+            "optionId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }
+          },
+          "required": ["kind", "conversationId", "lineId", "optionId"],
+          "additionalProperties": false
+        }
+      ]
     },
     "inventoryStack": {
       "type": "object",
       "properties": {
+        "id": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "owner": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/stateScope" },
         "itemId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "quantity": { "type": "integer", "minimum": 1 },
-        "containerItemId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "containerStackId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "equippedSlot": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "fields": { "type": "object", "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/recordOfScalars", "maxProperties": 10000 }
       },
-      "required": ["owner", "itemId", "quantity", "fields"],
+      "required": ["id", "owner", "itemId", "quantity", "fields"],
       "additionalProperties": false
     },
     "randomOutcome": {
@@ -105,7 +130,9 @@
           "additionalProperties": { "type": "boolean" }
         },
         "inventory": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/inventoryStack" } },
+        "nextInventoryStackOrdinal": { "type": "integer", "minimum": 0, "maximum": 1000000 },
         "conversationStack": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/conversationContext" } },
+        "dialogueHistory": { "type": "array", "maxItems": 16384, "items": { "$ref": "#/$defs/dialogueHistoryEntry" } },
         "entityTags": {
           "type": "object",
           "maxProperties": 10000,
@@ -139,7 +166,7 @@
           "additionalProperties": false
         }
       },
-      "required": ["currentNodeId", "state", "nodeVisitCounts", "conversationStack", "gameTimeMilliseconds", "randomnessMode", "randomInitialSeed", "randomSeed", "randomOutcomes", "ruleGuards", "inventory", "entityTags", "clockState"],
+      "required": ["currentNodeId", "state", "nodeVisitCounts", "conversationStack", "dialogueHistory", "gameTimeMilliseconds", "randomnessMode", "randomInitialSeed", "randomSeed", "randomOutcomes", "ruleGuards", "inventory", "nextInventoryStackOrdinal", "entityTags", "clockState"],
       "additionalProperties": false,
       "allOf": [
         {

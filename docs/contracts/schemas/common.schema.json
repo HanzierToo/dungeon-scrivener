@@ -132,6 +132,15 @@
         }
       ]
     },
+    "inventoryLocation": {
+      "type": "object",
+      "properties": {
+        "owner": { "$ref": "#/$defs/stateScope" },
+        "containerStackId": { "$ref": "#/$defs/id" }
+      },
+      "required": ["owner"],
+      "additionalProperties": false
+    },
     "stateReference": {
       "type": "object",
       "properties": {
@@ -209,6 +218,37 @@
             "tag": { "type": "string", "minLength": 1, "maxLength": 128 }
           },
           "required": ["kind", "entityId", "tag"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "has-seen-line" },
+            "conversationId": { "$ref": "#/$defs/id" },
+            "lineId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "conversationId", "lineId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "has-selected-dialogue-option" },
+            "conversationId": { "$ref": "#/$defs/id" },
+            "optionId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "conversationId", "optionId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "has-item" },
+            "owner": { "$ref": "#/$defs/stateScope" },
+            "itemId": { "$ref": "#/$defs/id" },
+            "quantity": { "type": "integer", "minimum": 1 }
+          },
+          "required": ["kind", "owner", "itemId", "quantity"],
           "additionalProperties": false
         },
         {
@@ -294,12 +334,54 @@
         {
           "type": "object",
           "properties": {
-            "kind": { "enum": ["add-item", "remove-item"] },
+            "kind": { "const": "add-item" },
             "owner": { "$ref": "#/$defs/stateScope" },
             "itemId": { "$ref": "#/$defs/id" },
-            "quantity": { "type": "integer", "minimum": 1 }
+            "quantity": { "type": "integer", "minimum": 1 },
+            "containerStackId": { "$ref": "#/$defs/id" },
+            "fields": { "$ref": "#/$defs/recordOfScalars" }
           },
           "required": ["kind", "owner", "itemId", "quantity"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "remove-item" },
+            "stackId": { "$ref": "#/$defs/id" },
+            "quantity": { "type": "integer", "minimum": 1 }
+          },
+          "required": ["kind", "stackId", "quantity"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "use-item" },
+            "stackId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "stackId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "transfer-item" },
+            "stackId": { "$ref": "#/$defs/id" },
+            "quantity": { "type": "integer", "minimum": 1 },
+            "destination": { "$ref": "#/$defs/inventoryLocation" }
+          },
+          "required": ["kind", "stackId", "quantity", "destination"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "enum": ["equip-item", "unequip-item"] },
+            "stackId": { "$ref": "#/$defs/id" },
+            "slotId": { "$ref": "#/$defs/id" }
+          },
+          "required": ["kind", "stackId", "slotId"],
           "additionalProperties": false
         },
         {

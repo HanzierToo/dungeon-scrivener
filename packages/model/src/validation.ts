@@ -386,6 +386,7 @@ function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnosti
   const eventIds = new Set(world.eventDefinitions.map((event) => event.id));
   const conversationIds = new Set(world.conversations.map((conversation) => conversation.id));
   const itemIds = new Set(world.itemDefinitions.map((item) => item.id));
+  const initialStackIds = new Set(world.initialInventory.map((stack) => stack.id));
   const scriptIds = new Set(world.scripts.map((script) => script.id));
   const ruleIds = new Set(world.rules.map((rule) => rule.id));
   const validateStateReference = (reference: { readonly scope: { readonly kind: string; readonly ownerId?: string }; readonly key: string }, ownerId: string) => {
@@ -419,6 +420,23 @@ function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnosti
       case 'has-tag':
         if (!entityIds.has(condition.entityId)) error('DS-MOD-022', `Condition references missing entity '${condition.entityId}'.`, ownerId);
         break;
+      case 'has-seen-line': {
+        const conversation = world.conversations.find((candidate) => candidate.id === condition.conversationId);
+        if (!conversation) error('DS-MOD-026', `Condition references missing conversation '${condition.conversationId}'.`, ownerId);
+        else if (!conversation.lines.some((line) => line.id === condition.lineId)) error('DS-MOD-029', `Condition references missing dialogue line '${condition.lineId}'.`, ownerId);
+        break;
+      }
+      case 'has-selected-dialogue-option': {
+        const conversation = world.conversations.find((candidate) => candidate.id === condition.conversationId);
+        if (!conversation) error('DS-MOD-026', `Condition references missing conversation '${condition.conversationId}'.`, ownerId);
+        else if (!conversation.lines.some((line) => line.options?.some((option) => option.id === condition.optionId))) error('DS-MOD-029', `Condition references missing dialogue option '${condition.optionId}'.`, ownerId);
+        break;
+      }
+      case 'has-item':
+        if (!itemIds.has(condition.itemId)) error('DS-MOD-025', `Condition references missing item '${condition.itemId}'.`, ownerId);
+        if (condition.owner.kind === 'node' && !nodesById.has(condition.owner.ownerId)) error('DS-MOD-021', `Condition references missing inventory owner node '${condition.owner.ownerId}'.`, ownerId);
+        if (condition.owner.kind === 'entity' && !entityIds.has(condition.owner.ownerId)) error('DS-MOD-022', `Condition references missing inventory owner entity '${condition.owner.ownerId}'.`, ownerId);
+        break;
       case 'at-node':
         if (!nodesById.has(condition.nodeId)) error('DS-MOD-021', `Condition references missing node '${condition.nodeId}'.`, ownerId);
         break;
@@ -447,10 +465,48 @@ function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnosti
           if (!edgeIds.has(effect.edgeId)) error('DS-MOD-024', `Effect references missing navigation edge '${effect.edgeId}'.`, ownerId);
           break;
         case 'add-item':
-        case 'remove-item':
-          if (!itemIds.has(effect.itemId)) error('DS-MOD-025', `Effect references missing item '${effect.itemId}'.`, ownerId);
+          {
+          const item = world.itemDefinitions.find((candidate) => candidate.id === effect.itemId);
+          if (!item) error('DS-MOD-025', `Effect references missing item '${effect.itemId}'.`, ownerId);
           if (effect.owner.kind === 'node' && !nodesById.has(effect.owner.ownerId)) error('DS-MOD-021', `Effect references missing owner node '${effect.owner.ownerId}'.`, ownerId);
           if (effect.owner.kind === 'entity' && !entityIds.has(effect.owner.ownerId)) error('DS-MOD-022', `Effect references missing owner entity '${effect.owner.ownerId}'.`, ownerId);
+          if (effect.containerStackId) {
+            const containerStack = world.initialInventory.find((candidate) => candidate.id === effect.containerStackId);
+            const containerItem = containerStack && world.itemDefinitions.find((candidate) => candidate.id === containerStack.itemId);
+            if (!containerStack) error('DS-MOD-037', `Effect references missing container stack '${effect.containerStackId}'.`, ownerId);
+            else if (!containerItem?.canContain || containerStack.quantity !== 1) error('DS-MOD-036', `Effect target '${effect.containerStackId}' is not a single-item container.`, ownerId);
+            else if (containerStack.owner.kind !== effect.owner.kind || ('ownerId' in effect.owner && (!('ownerId' in containerStack.owner) || containerStack.owner.ownerId !== effect.owner.ownerId))) error('DS-MOD-036', `Effect and container stack '${effect.containerStackId}' must have the same owner.`, ownerId);
+          }
+          if (item && effect.quantity > item.stackLimit) error('DS-MOD-041', `Added quantity exceeds item stack limit for '${effect.itemId}'.`, ownerId);
+          for (const [key, value] of Object.entries(effect.fields ?? {})) {
+            const field = item?.fields.find((candidate) => candidate.key === key);
+            if (!field) error('DS-MOD-038', `Effect supplies undeclared item field '${key}'.`, ownerId);
+            else if (!isTypedValue(value, field)) error('DS-MOD-042', `Effect supplies a mistyped item field '${key}'.`, ownerId);
+          }
+          break;
+          }
+        case 'remove-item':
+        case 'use-item':
+        case 'equip-item':
+        case 'unequip-item':
+        case 'transfer-item':
+          {
+            const stack = world.initialInventory.find((candidate) => candidate.id === effect.stackId);
+            if (!stack) error('DS-MOD-037', `Inventory effect references missing stack '${effect.stackId}'.`, ownerId);
+            if (effect.kind === 'transfer-item') {
+              if (effect.destination.owner.kind === 'node' && !nodesById.has(effect.destination.owner.ownerId)) error('DS-MOD-021', `Inventory transfer references missing owner node '${effect.destination.owner.ownerId}'.`, ownerId);
+              if (effect.destination.owner.kind === 'entity' && !entityIds.has(effect.destination.owner.ownerId)) error('DS-MOD-022', `Inventory transfer references missing owner entity '${effect.destination.owner.ownerId}'.`, ownerId);
+              if (effect.destination.containerStackId && !initialStackIds.has(effect.destination.containerStackId)) error('DS-MOD-037', `Inventory transfer references missing destination container stack '${effect.destination.containerStackId}'.`, ownerId);
+            }
+            if ((effect.kind === 'equip-item' || effect.kind === 'unequip-item') && stack) {
+              const item = world.itemDefinitions.find((candidate) => candidate.id === stack.itemId);
+              if (item?.equipmentSlot !== effect.slotId) error('DS-MOD-039', `Inventory stack '${effect.stackId}' does not support equipment slot '${effect.slotId}'.`, ownerId);
+            }
+            if (effect.kind === 'use-item' && stack) {
+              const item = world.itemDefinitions.find((candidate) => candidate.id === stack.itemId);
+              if (!item?.useEventId) error('DS-MOD-040', `Inventory item '${stack.itemId}' has no use event.`, ownerId);
+            }
+          }
           break;
         case 'start-conversation':
         case 'interrupt-conversation':
@@ -489,18 +545,60 @@ function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnosti
     validateCondition(rule.condition, rule.id);
     validateEffects(rule.effects, rule.id);
   }
-  for (const item of world.itemDefinitions) if (item.useEventId && !eventIds.has(item.useEventId)) error('DS-MOD-023', `Item references missing use event '${item.useEventId}'.`, item.id);
-  for (const checkpointId of world.savePolicy.checkpointNodeIds ?? []) if (!nodesById.has(checkpointId)) error('DS-MOD-021', `Save policy references missing checkpoint node '${checkpointId}'.`, checkpointId);
-  for (const stack of world.initialInventory) {
-    if (!itemIds.has(stack.itemId)) error('DS-MOD-025', `Initial inventory references missing item '${stack.itemId}'.`, stack.itemId);
-    if (stack.owner.kind === 'node' && !nodesById.has(stack.owner.ownerId)) error('DS-MOD-021', `Initial inventory references missing node '${stack.owner.ownerId}'.`, stack.itemId);
-    if (stack.owner.kind === 'entity' && !entityIds.has(stack.owner.ownerId)) error('DS-MOD-022', `Initial inventory references missing entity '${stack.owner.ownerId}'.`, stack.itemId);
-    if (stack.containerItemId) {
-      const container = world.itemDefinitions.find((item) => item.id === stack.containerItemId);
-      if (!container) error('DS-MOD-025', `Initial inventory references missing container '${stack.containerItemId}'.`, stack.itemId);
-      else if (!container.canContain) error('DS-MOD-036', `Initial inventory parent item '${stack.containerItemId}' is not declared as a container.`, stack.itemId);
+  for (const item of world.itemDefinitions) if (item.useEventId) {
+    const event = world.eventDefinitions.find((candidate) => candidate.id === item.useEventId);
+    if (!event) error('DS-MOD-023', `Item references missing use event '${item.useEventId}'.`, item.id);
+    else {
+      const payloadFields = new Map(event.payloadFields.map((field) => [field.key, field.valueType]));
+      if (payloadFields.size !== 3 || payloadFields.get('stackId') !== 'string' || payloadFields.get('itemId') !== 'string' || payloadFields.get('quantity') !== 'number') error('DS-MOD-043', `Use event '${event.id}' must declare exactly stackId:string, itemId:string, and quantity:number.`, item.id);
     }
   }
+  for (const checkpointId of world.savePolicy.checkpointNodeIds ?? []) if (!nodesById.has(checkpointId)) error('DS-MOD-021', `Save policy references missing checkpoint node '${checkpointId}'.`, checkpointId);
+  const initialStacks = new Map(world.initialInventory.map((stack) => [stack.id, stack]));
+  checkDuplicateIds(world.initialInventory.map((stack) => stack.id), 'initial inventory');
+  const equippedSlotOwners = new Set<string>();
+  for (const stack of world.initialInventory) {
+    const item = world.itemDefinitions.find((candidate) => candidate.id === stack.itemId);
+    if (!item) error('DS-MOD-025', `Initial inventory references missing item '${stack.itemId}'.`, stack.itemId);
+    else {
+      if (stack.quantity > item.stackLimit) error('DS-MOD-041', `Initial quantity exceeds item stack limit for '${stack.itemId}'.`, stack.id);
+      if (stack.equippedSlot && (item.equipmentSlot !== stack.equippedSlot || stack.quantity !== 1)) error('DS-MOD-039', `Initial equipment is invalid for stack '${stack.id}'.`, stack.id);
+      if (stack.equippedSlot) {
+        const equipmentKey = JSON.stringify([stack.owner, stack.equippedSlot]);
+        if (equippedSlotOwners.has(equipmentKey)) error('DS-MOD-039', `Initial equipment slot '${stack.equippedSlot}' is occupied more than once for one owner.`, stack.id);
+        equippedSlotOwners.add(equipmentKey);
+      }
+      for (const [key, value] of Object.entries(stack.fields)) {
+        const field = item.fields.find((candidate) => candidate.key === key);
+        if (!field) error('DS-MOD-038', `Initial inventory supplies undeclared item field '${key}'.`, stack.id);
+        else if (!isTypedValue(value, field)) error('DS-MOD-042', `Initial inventory supplies a mistyped item field '${key}'.`, stack.id);
+      }
+    }
+    if (stack.owner.kind === 'node' && !nodesById.has(stack.owner.ownerId)) error('DS-MOD-021', `Initial inventory references missing node '${stack.owner.ownerId}'.`, stack.itemId);
+    if (stack.owner.kind === 'entity' && !entityIds.has(stack.owner.ownerId)) error('DS-MOD-022', `Initial inventory references missing entity '${stack.owner.ownerId}'.`, stack.itemId);
+    if (stack.containerStackId) {
+      const containerStack = initialStacks.get(stack.containerStackId);
+      const container = containerStack && world.itemDefinitions.find((item) => item.id === containerStack.itemId);
+      if (!containerStack) error('DS-MOD-025', `Initial inventory references missing container stack '${stack.containerStackId}'.`, stack.itemId);
+      else if (!container?.canContain) error('DS-MOD-036', `Initial inventory parent stack '${stack.containerStackId}' is not a container.`, stack.itemId);
+      else if (containerStack.quantity !== 1) error('DS-MOD-036', `Initial inventory parent stack '${stack.containerStackId}' must have quantity one.`, stack.itemId);
+      else if (containerStack.owner.kind !== stack.owner.kind || ('ownerId' in stack.owner && (!('ownerId' in containerStack.owner) || containerStack.owner.ownerId !== stack.owner.ownerId))) error('DS-MOD-036', `Initial inventory stack '${stack.id}' and its container must have the same owner.`, stack.itemId);
+    }
+  }
+  const visitContainer = (stackId: string, visiting: Set<string>, visited: Set<string>): void => {
+    if (visiting.has(stackId)) {
+      error('DS-MOD-036', `Initial inventory contains a container cycle at stack '${stackId}'.`, stackId);
+      return;
+    }
+    if (visited.has(stackId)) return;
+    visiting.add(stackId);
+    const parentId = initialStacks.get(stackId)?.containerStackId;
+    if (parentId) visitContainer(parentId, visiting, visited);
+    visiting.delete(stackId);
+    visited.add(stackId);
+  };
+  const visitedStacks = new Set<string>();
+  for (const stack of world.initialInventory) visitContainer(stack.id, new Set(), visitedStacks);
   for (const conversation of world.conversations) {
     const lineIds = new Set(conversation.lines.map((line) => line.id));
     checkDuplicateIds(conversation.lines.map((line) => line.id), conversation.id);

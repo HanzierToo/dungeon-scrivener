@@ -4,3 +4,4 @@ export { dispatchAction, dispatchPlayerInput, enterSessionNode, getAvailableActi
 export { advanceActionTime, clockHudValue, observeClock } from './time.js';
 export { drawRandomFloat, drawRandomInt, MAX_UNSEEDED_OUTCOMES, obtainSeed, ZERO_SEED_REPLACEMENT } from './random.js';
 export { createSession } from './session.js';
+export { applyInventoryEffect, inventoryOperationEffect } from '../inventory/index.js';

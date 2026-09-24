@@ -486,6 +486,20 @@ function validateFixture(fixtureName) {
     } else if (condition.kind === "has-tag") {
       if (!entities.has(condition.entityId)) fail(label, "references missing entity " + condition.entityId);
       else if (!allowedTags.get(condition.entityId)?.has(condition.tag)) fail(label, "references undeclared entity tag " + condition.tag);
+    } else if (condition.kind === "has-seen-line" || condition.kind === "has-selected-dialogue-option") {
+      const conversation = conversations.get(condition.conversationId);
+      if (!conversation) fail(label, "references missing conversation " + condition.conversationId);
+      else if (condition.kind === "has-seen-line"
+          && !(conversation.lines ?? []).some((line) => line.id === condition.lineId)) {
+        fail(label, "references missing dialogue line " + condition.lineId);
+      } else if (condition.kind === "has-selected-dialogue-option"
+          && !(conversation.lines ?? []).some((line) => (line.options ?? []).some((option) => option.id === condition.optionId))) {
+        fail(label, "references missing dialogue option " + condition.optionId);
+      }
+    } else if (condition.kind === "has-item") {
+      if (!items.has(condition.itemId)) fail(label, "references missing item " + condition.itemId);
+      if (condition.owner.kind === "entity" && !entities.has(condition.owner.ownerId)) fail(label, "references missing entity inventory owner " + condition.owner.ownerId);
+      if (condition.owner.kind === "node" && !nodes.has(condition.owner.ownerId)) fail(label, "references missing node inventory owner " + condition.owner.ownerId);
     } else if (condition.kind === "at-node" && !nodes.has(condition.nodeId)) {
       fail(label, "references missing node " + condition.nodeId);
     } else if (condition.kind === "event-is" && !events.has(condition.eventId)) {
@@ -526,7 +540,7 @@ function validateFixture(fixtureName) {
       } else if ((effect.kind === "add-tag" || effect.kind === "remove-tag")) {
         if (!entities.has(effect.entityId)) fail(label, "references missing entity " + effect.entityId);
         else if (!allowedTags.get(effect.entityId)?.has(effect.tag)) fail(label, "references undeclared entity tag " + effect.tag);
-      } else if (effect.kind === "add-item" || effect.kind === "remove-item") {
+      } else if (effect.kind === "add-item") {
         if (!items.has(effect.itemId)) fail(label, "references missing item " + effect.itemId);
         if (effect.owner?.kind === "entity" && !entities.has(effect.owner.ownerId)) {
           fail(label, "inventory effect references missing owner " + effect.owner.ownerId);
@@ -534,6 +548,15 @@ function validateFixture(fixtureName) {
         if (effect.owner?.kind === "node" && !nodes.has(effect.owner.ownerId)) {
           fail(label, "inventory effect references missing node owner " + effect.owner.ownerId);
         }
+        if (effect.containerStackId && !(world.initialInventory ?? []).some((stack) => stack.id === effect.containerStackId)) fail(label, "inventory effect references missing container stack " + effect.containerStackId);
+        for (const key of Object.keys(effect.fields ?? {})) {
+          const definition = items.get(effect.itemId)?.fields?.find((field) => field.key === key);
+          if (!definition) fail(label, "inventory effect has undeclared item field " + effect.itemId + ":" + key);
+          else if (!matchesValueType(effect.fields[key], definition.valueType)) fail(label, "inventory effect has mistyped item field " + effect.itemId + ":" + key);
+        }
+      } else if (["remove-item", "use-item", "transfer-item", "equip-item", "unequip-item"].includes(effect.kind)) {
+        if (!(world.initialInventory ?? []).some((stack) => stack.id === effect.stackId)) fail(label, "inventory effect references missing stack " + effect.stackId);
+        if (effect.kind === "transfer-item" && effect.destination.containerStackId && !(world.initialInventory ?? []).some((stack) => stack.id === effect.destination.containerStackId)) fail(label, "inventory transfer references missing destination container stack " + effect.destination.containerStackId);
       } else if (["start-conversation", "interrupt-conversation", "resume-conversation"].includes(effect.kind)
         && !conversations.has(effect.conversationId)) {
         fail(label, "references missing conversation " + effect.conversationId);
@@ -591,6 +614,7 @@ function validateFixture(fixtureName) {
   uniqueById(allCommands, fixtureName + "/commands");
   for (const conversation of world.conversations ?? []) {
     const lines = uniqueById(conversation.lines, fixtureName + "/conversation/" + conversation.id + "/lines");
+    const optionIds = new Set();
     if (!lines.has(conversation.entryLineId)) fail(fixtureName, "conversation " + conversation.id + " references missing entry line " + conversation.entryLineId);
     for (const entityId of conversation.participantEntityIds ?? []) {
       if (!entities.has(entityId)) fail(fixtureName, "conversation " + conversation.id + " references missing participant " + entityId);
@@ -600,6 +624,11 @@ function validateFixture(fixtureName) {
       if (line.nextLineId && !lines.has(line.nextLineId)) fail(fixtureName, "dialogue line " + line.id + " references missing next line " + line.nextLineId);
       checkCondition(line.condition, fixtureName + "/line/" + line.id);
       for (const option of line.options ?? []) {
+        if (optionIds.has(option.id)) fail(fixtureName + "/conversation/" + conversation.id, "duplicate dialogue option ID " + option.id);
+        optionIds.add(option.id);
+        if (option.disabledReason && (option.falsePolicy !== "disable" || !option.condition)) {
+          fail(fixtureName + "/option/" + option.id, "disabledReason requires a conditional option with falsePolicy disable");
+        }
         if (option.nextLineId && !lines.has(option.nextLineId)) fail(fixtureName, "dialogue option " + option.id + " references missing next line " + option.nextLineId);
         checkCondition(option.condition, fixtureName + "/option/" + option.id);
         checkEffects(option.effects, fixtureName + "/option/" + option.id);
@@ -612,10 +641,31 @@ function validateFixture(fixtureName) {
     checkCondition(edge.condition, fixtureName + "/edge/" + edge.id);
   }
   for (const stack of world.initialInventory ?? []) {
-    if (!items.has(stack.itemId)) fail(fixtureName, "initial inventory references missing item " + stack.itemId);
-    if (stack.owner.kind === "entity" && !entities.has(stack.owner.ownerId)) fail(fixtureName, "initial inventory references missing owner " + stack.owner.ownerId);
-    if (stack.owner.kind === "node" && !nodes.has(stack.owner.ownerId)) fail(fixtureName, "initial inventory references missing node owner " + stack.owner.ownerId);
+      if (!items.has(stack.itemId)) fail(fixtureName, "initial inventory references missing item " + stack.itemId);
+      if (stack.owner.kind === "entity" && !entities.has(stack.owner.ownerId)) fail(fixtureName, "initial inventory references missing owner " + stack.owner.ownerId);
+      if (stack.owner.kind === "node" && !nodes.has(stack.owner.ownerId)) fail(fixtureName, "initial inventory references missing node owner " + stack.owner.ownerId);
+      if (stack.containerStackId && !(world.initialInventory ?? []).some((container) => container.id === stack.containerStackId)) fail(fixtureName, "initial inventory references missing container stack " + stack.containerStackId);
   }
+  const initialInventoryIds = (world.initialInventory ?? []).map((stack) => stack.id);
+  if (new Set(initialInventoryIds).size !== initialInventoryIds.length) fail(fixtureName, "initial inventory has duplicate stack IDs");
+  const initialById = new Map((world.initialInventory ?? []).map((stack) => [stack.id, stack]));
+    for (const stack of world.initialInventory ?? []) {
+      const parent = stack.containerStackId ? initialById.get(stack.containerStackId) : undefined;
+      if (parent) {
+        if (parent.owner.kind !== stack.owner.kind || (parent.owner.kind !== "world" && parent.owner.ownerId !== stack.owner.ownerId)) fail(fixtureName, "initial inventory container owner differs for stack " + stack.id);
+        if (!items.get(parent.itemId)?.canContain) fail(fixtureName, "initial inventory parent stack is not a container " + parent.id);
+        if (parent.quantity !== 1) fail(fixtureName, "initial inventory parent container stack must have quantity one " + parent.id);
+      }
+      let cursor = stack;
+      const seen = new Set([stack.id]);
+      while (cursor.containerStackId) {
+        if (seen.has(cursor.containerStackId)) { fail(fixtureName, "initial inventory contains a container cycle at " + stack.id); break; }
+        seen.add(cursor.containerStackId);
+        const next = initialById.get(cursor.containerStackId);
+        if (!next) break;
+        cursor = next;
+      }
+    }
 
   for (const command of allCommands) {
     if ((command.parameters ?? []).length > 16) fail(fixtureName, "command " + command.id + " exceeds 16 parameters");
@@ -830,21 +880,51 @@ function validateFixture(fixtureName) {
         fail(label, "conversationStack references missing line " + context.conversationId + ":" + context.lineId);
       }
       if (!nodes.has(context.returnNodeId)) fail(label, "conversationStack references missing return node " + context.returnNodeId);
-      for (const lineId of context.historyLineIds) {
-        if (!conversation?.lines?.some((line) => line.id === lineId)) fail(label, "conversationStack history references missing line " + context.conversationId + ":" + lineId);
+    }
+    for (const entry of save.session.dialogueHistory) {
+      const conversation = conversations.get(entry.conversationId);
+      const line = conversation?.lines?.find((candidate) => candidate.id === entry.lineId);
+      if (!conversation) fail(label, "dialogueHistory references missing conversation " + entry.conversationId);
+      else if (!line) fail(label, "dialogueHistory references missing line " + entry.conversationId + ":" + entry.lineId);
+      else if (entry.kind === "option-selected" && !(line.options ?? []).some((option) => option.id === entry.optionId)) {
+        fail(label, "dialogueHistory references missing option " + entry.conversationId + ":" + entry.lineId + ":" + entry.optionId);
       }
     }
     for (const stack of save.session.inventory) {
       if (!items.has(stack.itemId)) fail(label, "inventory references missing item " + stack.itemId);
       if (stack.owner.kind === "entity" && !entities.has(stack.owner.ownerId)) fail(label, "inventory references missing entity owner " + stack.owner.ownerId);
       if (stack.owner.kind === "node" && !nodes.has(stack.owner.ownerId)) fail(label, "inventory references missing node owner " + stack.owner.ownerId);
-      if (stack.containerItemId && !items.has(stack.containerItemId)) fail(label, "inventory references missing container item " + stack.containerItemId);
+      if (stack.containerStackId && !save.session.inventory.some((container) => container.id === stack.containerStackId)) fail(label, "inventory references missing container stack " + stack.containerStackId);
       const item = items.get(stack.itemId);
+      if (item && stack.quantity > item.stackLimit) fail(label, "inventory stack exceeds item stack limit " + stack.id);
+      if (stack.equippedSlot && (item?.equipmentSlot !== stack.equippedSlot || stack.quantity !== 1)) fail(label, "inventory has invalid equipped slot on stack " + stack.id);
+      if (stack.containerStackId) {
+        const parent = save.session.inventory.find((candidate) => candidate.id === stack.containerStackId);
+        if (parent && !items.get(parent.itemId)?.canContain) fail(label, "inventory parent stack is not a container " + parent.id);
+        if (parent && parent.quantity !== 1) fail(label, "inventory parent container stack must have quantity one " + parent.id);
+        if (parent && (parent.owner.kind !== stack.owner.kind || (parent.owner.kind !== "world" && parent.owner.ownerId !== stack.owner.ownerId))) fail(label, "inventory container owner differs for stack " + stack.id);
+      }
       const fieldKeys = new Set((item?.fields ?? []).map((field) => field.key));
       for (const [key, value] of Object.entries(stack.fields)) {
         const field = item?.fields?.find((candidate) => candidate.key === key);
         if (!fieldKeys.has(key)) fail(label, "inventory has undeclared item field " + stack.itemId + ":" + key);
         else if (!matchesValueType(value, field.valueType)) fail(label, "inventory has the wrong value type for " + stack.itemId + ":" + key);
+      }
+    }
+    if (new Set(save.session.inventory.map((stack) => stack.id)).size !== save.session.inventory.length) fail(label, "inventory has duplicate stack IDs");
+    const equippedKeys = save.session.inventory.filter((stack) => stack.equippedSlot).map((stack) => JSON.stringify([stack.owner, stack.equippedSlot]));
+    if (new Set(equippedKeys).size !== equippedKeys.length) fail(label, "inventory equips more than one stack into the same owner slot");
+    const maxGeneratedOrdinal = Math.max(-1, ...save.session.inventory.map((stack) => /^stack-(\d+)$/.exec(stack.id)).filter(Boolean).map((match) => Number(match[1])));
+    if (save.session.nextInventoryStackOrdinal <= maxGeneratedOrdinal) fail(label, "nextInventoryStackOrdinal would reuse an existing generated stack ID");
+    for (const stack of save.session.inventory) {
+      const seen = new Set([stack.id]);
+      let cursor = stack;
+      while (cursor.containerStackId) {
+        if (seen.has(cursor.containerStackId)) { fail(label, "inventory contains a container cycle at " + stack.id); break; }
+        seen.add(cursor.containerStackId);
+        const next = save.session.inventory.find((candidate) => candidate.id === cursor.containerStackId);
+        if (!next) break;
+        cursor = next;
       }
     }
     for (const outcome of save.session.randomOutcomes) {

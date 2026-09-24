@@ -104,6 +104,8 @@ export function createSession(
     state: createInitialState(world),
     nodeVisitCounts: Object.fromEntries(world.nodes.map((node) => [node.id, 0])),
     conversationStack: [],
+    dialogueHistory: [],
+    nextInventoryStackOrdinal: 0,
     gameTimeMilliseconds: 0,
     randomnessMode: world.settings.randomness.mode,
     randomInitialSeed: seed,

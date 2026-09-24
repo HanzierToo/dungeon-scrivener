@@ -74,12 +74,16 @@ Check UTF-16 validity and raw byte/scalar limits before normalization. Then NFC-
 | JSON nesting depth | 64 |
 | Unseeded random outcomes in one session | 16,384 |
 | Inventory stacks in one session | 10,000 |
+| Generated inventory stack ordinal | 1,000,000 |
+| Quantity in one inventory stack | The item's declared `stackLimit` |
 | Saved conversation contexts | 64 |
-| Dialogue history IDs per context | 10,000 |
+| Durable dialogue history entries per session | 16,384 |
 | Saved epoch timestamp | 0 through `Number.MAX_SAFE_INTEGER` milliseconds |
 | Per-action game time | 0 through `Number.MAX_SAFE_INTEGER` milliseconds |
 
-Before committing a session transition and before encoding a save, measure the canonical serialized session; exceeding 8 MiB fails the transition/save with a diagnostic and retains the old session. On import, reject an over-limit archive/member before replacing the active session. Do not truncate state, inventory, conversation history, seeded state, or random outcome history. When a collection limit is reached, the operation that would exceed it fails atomically. A save that cannot fit is a save failure; it is never reported as successful.
+Before committing a session transition and before encoding a save, measure the canonical serialized session; exceeding 8 MiB fails the transition/save with a diagnostic and retains the old session. On import, reject an over-limit archive/member before replacing the active session. Do not truncate state, inventory, dialogue history, seeded state, or random outcome history. When a collection limit is reached, the operation that would exceed it fails atomically. A save that cannot fit is a save failure; it is never reported as successful.
+
+Inventory stack count and generated-stack ordinal are checked before allocation. Exceeding either limit, a stack quantity limit, or an inventory field/owner/container constraint rejects the entire enclosing transaction. The engine never merges stacks to avoid a limit, chooses an arbitrary matching stack, or prunes inventory.
 
 ## Clock inputs
 

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:inventory-operation-resolution",
+  "title": "DungeonScrivener inventory operation resolution v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "inventory" },
+        "operation": { "$ref": "urn:dungeon-scrivener:schema:v1:player-input#/oneOf/3/properties/operation" }
+      },
+      "required": ["kind", "operation"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "invalid-inventory-input" },
+        "diagnostic": {
+          "type": "object",
+          "properties": {
+            "code": { "type": "string", "pattern": "^DS-[A-Z]{2,8}-[0-9]{3,5}$" },
+            "severity": { "enum": ["info", "warning", "error", "fatal"] },
+            "message": { "type": "string", "minLength": 1, "maxLength": 4096 }
+          },
+          "required": ["code", "severity", "message"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["kind", "diagnostic"],
+      "additionalProperties": false
+    }
+  ]
+}

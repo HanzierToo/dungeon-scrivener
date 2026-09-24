@@ -565,9 +565,11 @@
       "items": {
         "type": "object",
         "properties": {
+          "stackId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
           "itemId": {
             "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
           },
+          "owner": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/stateScope" },
           "label": {
             "type": "string"
           },
@@ -575,10 +577,13 @@
             "type": "integer",
             "minimum": 1
           },
-          "containerItemId": {
+          "containerStackId": {
             "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
           },
           "equipmentSlot": {
+            "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
+          },
+          "equippedSlot": {
             "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
           },
           "fields": {
@@ -586,7 +591,9 @@
           }
         },
         "required": [
+          "stackId",
           "itemId",
+          "owner",
           "label",
           "quantity",
           "fields"

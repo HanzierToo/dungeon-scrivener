@@ -25,6 +25,11 @@
       "old-gate": 1
     },
     "conversationStack": [],
+    "dialogueHistory": [
+      { "kind": "line-seen", "conversationId": "mira-story", "lineId": "mira-after-return" },
+      { "kind": "option-selected", "conversationId": "mira-story", "lineId": "mira-after-return", "optionId": "claim-silver-key" },
+      { "kind": "line-seen", "conversationId": "mira-story", "lineId": "mira-farewell" }
+    ],
     "gameTimeMilliseconds": 0,
     "randomnessMode": "seeded",
     "randomInitialSeed": 17,
@@ -32,6 +37,7 @@
     "randomOutcomes": [],
     "ruleGuards": {},
     "inventory": [],
+    "nextInventoryStackOrdinal": 0,
     "entityTags": {
       "traveler": ["known"]
     },

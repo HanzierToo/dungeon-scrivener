@@ -3,6 +3,7 @@ import type {
   SavedSessionState, SessionSnapshot, StateFieldDefinition, StateReference, TraceSource, TransitionResult,
   TransitionTraceRecord, ValueType, WorldDocument,
 } from '@dungeon-scrivener/model';
+import { applyInventoryEffect } from '../inventory/index.js';
 
 const INVALID_EFFECT = 'DS-ENG-001';
 
@@ -152,6 +153,16 @@ export function reduceEffects(
         ? (current.includes(effect.tag) ? current : [...current, effect.tag])
         : current.filter((tag) => tag !== effect.tag);
       provisional = { ...provisional, entityTags: { ...provisional.entityTags, [effect.entityId]: next } };
+      trace.push({ sequence: trace.length, kind: 'state-change', source: { ...source }, reason, effect: structuredClone(effect) });
+      continue;
+    }
+    if (effect.kind === 'add-item' || effect.kind === 'remove-item' || effect.kind === 'transfer-item' || effect.kind === 'equip-item' || effect.kind === 'unequip-item') {
+      const inventory = applyInventoryEffect(world, provisional, effect);
+      if (!inventory.ok) {
+        diagnostics.push(...inventory.diagnostics);
+        break;
+      }
+      provisional = inventory.snapshot;
       trace.push({ sequence: trace.length, kind: 'state-change', source: { ...source }, reason, effect: structuredClone(effect) });
       continue;
     }

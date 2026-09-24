@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dungeon-scrivener:schema:v1:dialogue-option-resolution",
+  "title": "DungeonScrivener dialogue option resolution v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "dialogue-option" },
+        "conversationId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "lineId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "optionId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }
+      },
+      "required": ["kind", "conversationId", "lineId", "optionId"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "dialogue-option-disabled" },
+        "conversationId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "lineId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "optionId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "disabledReason": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      },
+      "required": ["kind", "conversationId", "lineId", "optionId", "disabledReason"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "invalid-dialogue-option" },
+        "diagnostic": { "$ref": "urn:dungeon-scrivener:schema:v1:diagnostics#/properties/diagnostics/items" }
+      },
+      "required": ["kind", "diagnostic"],
+      "additionalProperties": false
+    }
+  ]
+}

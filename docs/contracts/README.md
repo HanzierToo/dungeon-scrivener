@@ -9,6 +9,9 @@ These are the corrected 1B draft contracts for downstream review. The user has a
 - `schemas/locale.schema.json`: `locales/*.json`.
 - `schemas/script-ir.schema.json`: parsed source compiled to the shared interpreter representation.
 - `schemas/script-bundle.schema.json`: compiled IR bundle supplied to the engine; an empty bundle is valid and exact correspondence is checked against `world.scripts` at session creation and again before script-capable transitions.
+- `schemas/player-input.schema.json`: choice, raw-command, dialogue-option, and use/transfer/equip/unequip inventory submissions.
+- `schemas/dialogue-option-resolution.schema.json`: accepted, disabled, or stale dialogue-option resolutions.
+- `schemas/inventory-operation-resolution.schema.json`: accepted inventory operations or typed invalid-input diagnostics.
 - `schemas/session-creation-failure.schema.json`: typed diagnostics result when a session cannot be created.
 - `schemas/player-save-operation-failure.schema.json`: typed encode/decode failure results with diagnostics.
 - `schemas/script-execution-result.schema.json`: serializable executor result and bounded trace records; capability callbacks are in-process TypeScript functions and are specified in `script-subset.md`.
@@ -17,10 +20,10 @@ These are the corrected 1B draft contracts for downstream review. The user has a
 - `schemas/project-vfs.schema.json`: metadata index for an in-memory virtual file tree.
 - `schemas/project-archive.schema.json`: validated metadata for a project ZIP. It is not an extra ZIP member.
 - `schemas/save-policy.schema.json`: player save slot policy document. `world.json` carries the same policy fields inline.
-- `schemas/player-save.schema.json`: portable player session payload inside a save ZIP.
+- `schemas/player-save.schema.json`: portable player session payload inside a save ZIP, including durable dialogue history.
 - `schemas/content-fingerprint.schema.json`: digest input manifest and resulting digest.
 
-Each document schema has a `.valid.json` and `.invalid.json` example under `examples/`. `npm run check:contracts` checks the examples against all schemas, validates every fixture JSON document, checks compiled bundle declarations against the fixture world's script list (including the linear fixture's empty bundle), checks cross-file IDs/locale/asset/script references and typing-sound fingerprint inclusion, checks save/session size and replay-log integrity, and parses all three fixture script samples. The Vitest suite remains empty at this task boundary.
+Each document schema has a `.valid.json` and `.invalid.json` example under `examples/`. `npm run check:contracts` checks the examples against all schemas, validates every fixture JSON document, checks compiled bundle declarations against the fixture world's script list (including the linear fixture's empty bundle), checks cross-file dialogue-history and inventory stack/owner/item/container references, locale/asset/script references and typing-sound fingerprint inclusion, checks save/session size and replay-log integrity, and parses all three fixture script samples. `npm test` runs the focused model validation and package test suites.
 
 Additional semantics are specified in `data-model.md`, `script-subset.md`, `budgets.md`, and `archive-save-fingerprint.md`. Contract checking validates schema syntax/references, example classifications, fixture JSON and cross-references, media hashes, and script syntax. It does not execute scripts, run game transitions, or parse project ZIP archives.
 

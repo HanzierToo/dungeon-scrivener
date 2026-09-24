@@ -25,6 +25,7 @@
       "old-gate": 1
     },
     "conversationStack": [],
+    "dialogueHistory": [],
     "gameTimeMilliseconds": 0,
     "randomnessMode": "unseeded",
     "randomInitialSeed": null,
@@ -32,6 +33,7 @@
     "randomOutcomes": [],
     "ruleGuards": {},
     "inventory": [],
+    "nextInventoryStackOrdinal": 0,
     "entityTags": {
       "traveler": ["known"]
     },

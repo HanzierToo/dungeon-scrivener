@@ -1,0 +1,9 @@
+{
+  "kind": "inventory",
+  "operation": {
+    "kind": "transfer",
+    "stackId": "stack-0",
+    "quantity": 0,
+    "destination": { "owner": { "kind": "world" } }
+  }
+}
