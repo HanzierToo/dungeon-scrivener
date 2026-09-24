@@ -348,7 +348,7 @@ function localize(source: { readonly kind: 'literal'; readonly text: string } | 
 
 /** Returns the localized dialogue projection without exposing mutable session state. */
 export function projectDialogueView(
-  manifest: ProjectManifest,
+  manifest: Pick<ProjectManifest, 'defaultLocale'>,
   world: WorldDocument,
   locales: readonly LocaleDocument[],
   snapshot: SessionSnapshot,
@@ -452,4 +452,3 @@ export function completeTerminalConversation(world: WorldDocument, snapshot: Ses
     diagnostics: [],
   };
 }
-

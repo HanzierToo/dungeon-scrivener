@@ -865,6 +865,57 @@ export interface MediaAssetApi {
   resolveAsset(assetId: ContentDigest): MediaAssetResolution;
 }
 
+export interface ValidatedAuthorStyle {
+  /** CSS text accepted by the player-style validator; empty text selects the built-in style. */
+  readonly cssText: string;
+}
+
+export interface PortablePlayerArtifact {
+  readonly format: 'dungeon-scrivener-portable-player';
+  readonly schemaVersion: SchemaVersion;
+  /** Standalone HTML shell with the built-in classic runtime and one required data marker. */
+  readonly indexHtml: Uint8Array;
+}
+
+export interface EmbeddedPortableMediaAsset {
+  readonly assetId: ContentDigest;
+  readonly mediaType: string;
+  readonly byteLength: number;
+  /** Standard base64 encoding of the verified media bytes. */
+  readonly base64: string;
+}
+
+/** JSON payload embedded in the standalone player document for direct-open runtime use. */
+export interface EmbeddedPortableGameData {
+  readonly format: 'dungeon-scrivener-embedded-game-data';
+  readonly schemaVersion: SchemaVersion;
+  readonly manifest: ProjectManifest;
+  readonly world: WorldDocument;
+  readonly locales: readonly LocaleDocument[];
+  readonly scripts: CompiledScriptBundle;
+  readonly authorStyle: ValidatedAuthorStyle;
+  readonly media: readonly EmbeddedPortableMediaAsset[];
+}
+
+export interface ExportGameInput {
+  readonly manifest: ProjectManifest;
+  readonly world: WorldDocument;
+  readonly locales: readonly LocaleDocument[];
+  readonly scripts: CompiledScriptBundle;
+  /** Assets resolved and hash-verified through MediaAssetApi. */
+  readonly media: readonly ResolvedMediaAsset[];
+  readonly authorStyle: ValidatedAuthorStyle;
+  readonly player: PortablePlayerArtifact;
+}
+
+export type ExportGameResult =
+  | { readonly ok: true; readonly zipBytes: Uint8Array }
+  | { readonly ok: false; readonly diagnostics: DiagnosticReport };
+
+export interface ExporterApi {
+  exportGame(input: ExportGameInput): Promise<ExportGameResult>;
+}
+
 export interface GameEngineHost {
   readonly scriptExecutor: ScriptExecutorApi;
   readonly mediaAssets: MediaAssetApi;

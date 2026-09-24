@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/core/index.ts",
+    ".": "./src/index.ts",
     "./inventory": "./src/inventory/index.ts"
   },
   "dependencies": {
+    "@dungeon-scrivener/markdown": "0.0.0",
+    "@dungeon-scrivener/media": "1.0.0",
     "@dungeon-scrivener/model": "0.0.0"
   }
 }

@@ -2,9 +2,24 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "types": [],
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@dungeon-scrivener/engine": [
+        "../engine/src/index.ts"
+      ]
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "browser/**/*.ts", "browser/**/*.tsx"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "browser/**/*.ts",
+    "browser/**/*.tsx",
+    "src/portable-entry.tsx"
+  ]
 }
