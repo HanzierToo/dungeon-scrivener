@@ -9,6 +9,7 @@ export type { ScriptIR, ScriptExpression, ScriptStatement, ScriptFunction } from
 
 const DIAGNOSTIC_CODE = 'DS-SCRIPT-001';
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
 const CAPABILITIES = new Set<ScriptCapabilityName>([
   'api.read', 'api.hasTag', 'api.request', 'api.emit', 'api.randomInt', 'api.randomFloat', 'len',
 ]);
@@ -109,18 +110,18 @@ function validateEffect(value: unknown): value is ScriptEffect {
   switch (value.kind) {
     case 'set-state':
       return isRecord(value.target) && validateScope(value.target.scope)
-        && typeof value.target.key === 'string' && IDENTIFIER.test(value.target.key)
+        && typeof value.target.key === 'string' && STATE_KEY.test(value.target.key)
         && ['string', 'number', 'boolean'].includes(typeof value.value)
         && (typeof value.value !== 'number' || Number.isFinite(value.value))
         && hasOwnKeys(value, ['kind', 'target', 'value']);
     case 'increment-state':
       return isRecord(value.target) && validateScope(value.target.scope)
-        && typeof value.target.key === 'string' && IDENTIFIER.test(value.target.key)
+        && typeof value.target.key === 'string' && STATE_KEY.test(value.target.key)
         && typeof value.amount === 'number' && Number.isFinite(value.amount)
         && hasOwnKeys(value, ['kind', 'target', 'amount']);
     case 'add-tag':
     case 'remove-tag':
-      return typeof value.entityId === 'string' && IDENTIFIER.test(value.entityId)
+      return typeof value.entityId === 'string' && STATE_KEY.test(value.entityId)
         && typeof value.tag === 'string' && value.tag.length > 0 && value.tag.length <= 128
         && hasOwnKeys(value, ['kind', 'entityId', 'tag']);
     case 'emit-event':
@@ -298,7 +299,26 @@ function validateCall(value: Record<string, unknown>, scope: Scope, context: Val
       else {
         const entries = value.arguments[0].entries;
         const effect = Object.fromEntries(Array.isArray(entries) ? entries.filter(isRecord).map((entry) => [entry.key, literalValue(entry.value)]) : []);
-        if (!validateEffect(effect)) fail(context, 'api.request effect is invalid or attempts to write state directly.', span);
+        if (!validateEffect(effect)) {
+          const effectEntries = Array.isArray(entries) ? entries.filter(isRecord) : [];
+          const byKey = new Map(effectEntries.filter((entry) => typeof entry.key === 'string').map((entry) => [entry.key as string, entry.value]));
+          const target = effect.target;
+          const targetIsValid = isRecord(target) && validateScope(target.scope)
+            && typeof target.key === 'string' && STATE_KEY.test(target.key)
+            && hasOwnKeys(target, ['scope', 'key']);
+          let dynamicEffectIsValid = false;
+          if (effect.kind === 'set-state' && targetIsValid
+            && effectEntries.length === 3 && byKey.has('kind') && byKey.has('target') && byKey.has('value')) {
+            const valueKind = inferExpression(byKey.get('value'), scope, context, depth + 1, span);
+            dynamicEffectIsValid = ['string', 'number', 'boolean', 'unknown'].includes(valueKind);
+          } else if (effect.kind === 'increment-state' && targetIsValid
+            && effectEntries.length === 3 && byKey.has('kind') && byKey.has('target') && byKey.has('amount')) {
+            const amountExpression = byKey.get('amount');
+            const amountKind = inferExpression(amountExpression, scope, context, depth + 1, span);
+            dynamicEffectIsValid = amountKind === 'number' || amountKind === 'unknown';
+          }
+          if (!dynamicEffectIsValid) fail(context, 'api.request effect is invalid or attempts to write state directly.', span);
+        }
       }
       return 'void';
     case 'api.emit': count(2); expect(0, 'string'); expect(1, 'map'); return 'void';

@@ -5,6 +5,7 @@ import type {
 import { enterSessionNode } from './actions.js';
 import { createInitialState } from './state.js';
 import { obtainSeed } from './random.js';
+import { createScriptExecutionEnvironment } from './script-runtime.js';
 
 const INVALID_SESSION = 'DS-ENG-013';
 
@@ -60,7 +61,8 @@ function checkScriptBundle(world: WorldDocument, bundle: CompiledScriptBundle): 
 
 /** Creates a complete initial session using only host-supplied seed and clock values. */
 export function createSession(
-  host: Pick<GameEngineHost, 'seededSeedSource'>,
+  host: Pick<GameEngineHost, 'seededSeedSource'>
+    & Partial<Pick<GameEngineHost, 'scriptExecutor' | 'unseededRandomSource' | 'unseededRandomReplaySource'>>,
   bundle: CompiledScriptBundle,
   projectId: ProjectId,
   world: WorldDocument,
@@ -122,7 +124,10 @@ export function createSession(
     ruleGuards: Object.fromEntries(world.rules.map((rule) => [rule.id, false])),
     inventory: world.initialInventory.map((stack) => ({ ...stack, owner: { ...stack.owner }, fields: { ...stack.fields } })),
   };
-  const entered = enterSessionNode(world, snapshot);
+  const scriptEnvironment = host.scriptExecutor
+    ? createScriptExecutionEnvironment({ ...host, scriptExecutor: host.scriptExecutor }, bundle)
+    : undefined;
+  const entered = enterSessionNode(world, snapshot, scriptEnvironment);
   if (entered.diagnostics.diagnostics.length > 0) return failed(entered.diagnostics.diagnostics);
   return { ok: true, snapshot: entered.snapshot };
 }

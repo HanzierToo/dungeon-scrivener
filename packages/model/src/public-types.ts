@@ -528,6 +528,66 @@ export interface PlayerView {
   readonly diagnostics: readonly Pick<Diagnostic, 'code' | 'severity' | 'message'>[];
 }
 
+export type AvailabilityVisibilityPolicy = 'hide' | 'disable';
+
+export type ConditionObservedValue =
+  | { readonly kind: 'state'; readonly value: Scalar }
+  | { readonly kind: 'tag-membership'; readonly entityId: EntityId; readonly tag: string; readonly present: boolean }
+  | { readonly kind: 'dialogue-history'; readonly matchingEntries: readonly DialogueHistoryEntry[] }
+  | { readonly kind: 'inventory-total'; readonly owner: StateScope; readonly itemId: ItemId; readonly quantity: number; readonly matchingStackIds: readonly InventoryStackId[] }
+  | { readonly kind: 'current-node'; readonly nodeId: NodeId }
+  | { readonly kind: 'event'; readonly triggeringEventId: EventId | null }
+  | { readonly kind: 'game-time'; readonly milliseconds: number };
+
+export interface AvailabilityTraceReference {
+  /** Index into the chronological trace history supplied to getAvailableActions. */
+  readonly transitionIndex: number;
+  /** Sequence within that transition's TransitionResult.trace. */
+  readonly sequence: number;
+}
+
+export type StateReadProvenance =
+  | { readonly kind: 'recorded'; readonly stateChange: AvailabilityTraceReference; readonly sourceRule?: AvailabilityTraceReference }
+  | { readonly kind: 'session-start'; readonly completeTraceHistory: true }
+  | { readonly kind: 'unknown'; readonly reason: 'trace-history-not-provided' | 'trace-history-starts-after-save' };
+
+export interface ConditionEvaluationRead {
+  /** Child indexes from the root condition; an empty path addresses the root leaf. */
+  readonly conditionPath: readonly number[];
+  readonly conditionKind: Exclude<Condition['kind'], 'all' | 'any' | 'not'>;
+  readonly stateReference?: StateReference;
+  readonly observed: ConditionObservedValue;
+  readonly result: boolean;
+  /** Present for compare-state reads; absent for other condition kinds. */
+  readonly provenance?: StateReadProvenance;
+}
+
+export interface AvailableActionEvaluation {
+  readonly id: ChoiceId | CommandId | DialogueOptionId;
+  readonly kind: 'choice' | 'command' | 'dialogue-option';
+  /** Null means no authored condition, which evaluates true and produces no reads. */
+  readonly condition: Condition | null;
+  readonly result: boolean;
+  readonly visibilityPolicy: AvailabilityVisibilityPolicy;
+  readonly visibility: 'visible' | 'hidden';
+  readonly enabled: boolean;
+  readonly reads: readonly ConditionEvaluationRead[];
+}
+
+export interface AvailabilityTraceHistory {
+  /** True only when the supplied ordered batches include every transition since session creation. */
+  readonly completeFromSessionStart: boolean;
+  /** Chronological TransitionResult.trace arrays retained by the debugger. */
+  readonly transitions: readonly (readonly TransitionTraceRecord[])[];
+}
+
+export interface AvailableActionsResult {
+  readonly choices: readonly AvailableActionEvaluation[];
+  readonly commands: readonly AvailableActionEvaluation[];
+  /** Options on the currently active dialogue line; empty when no dialogue is active. */
+  readonly dialogueOptions: readonly AvailableActionEvaluation[];
+}
+
 export type ProjectFileRole = 'manifest' | 'world' | 'locale' | 'script' | 'asset' | 'arbitrary';
 
 export interface ProjectFile {
@@ -899,6 +959,12 @@ export interface ProjectVfsApi {
 
 export interface GameEngineApi {
   createSession(projectId: ProjectId, world: WorldDocument, options: SessionStartOptions): SessionCreationResult;
+  /** Read-only condition evaluation for the effective actions and current active dialogue line. */
+  inspectActionAvailability(
+    world: WorldDocument,
+    snapshot: SessionSnapshot,
+    traceHistory?: AvailabilityTraceHistory
+  ): AvailableActionsResult;
   matchCommandText(world: WorldDocument, snapshot: SessionSnapshot, rawText: string): CommandMatchResult;
   dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnapshot, input: PlayerInput): PlayerInputTransitionResult;
   observeClock(world: WorldDocument, snapshot: SessionSnapshot, input: ClockInput): TransitionResult;

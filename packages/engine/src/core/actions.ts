@@ -1,12 +1,16 @@
 import type {
-  ActionInput, ActionSet, ChoiceDefinition, CommandDefinition, CommandMatchResult,
+  ActionInput, ActionSet, AvailableActionEvaluation, AvailableActionsResult, AvailabilityTraceHistory, ChoiceDefinition, CommandDefinition, CommandMatchResult,
   Condition, Diagnostic, Effect, EventOccurrence, LifecycleEffects, PlayerInput,
-  PlayerInputResolution, PlayerInputTransitionResult, Scalar, SessionSnapshot,
+  PlayerInputResolution, PlayerInputTransitionResult, Scalar, ScriptInvocationOrigin, SessionSnapshot,
   TraceSource, TransitionResult, TransitionTraceRecord, ValueType, WorldDocument,
 } from '@dungeon-scrivener/model';
-import { evaluateConditionValue, processEventQueue, processRulePhase, shouldRunLifecycleEffects } from './rules.js';
-import { reduceEffects } from './state.js';
+import { evaluateConditionValue, inspectCondition, processEventQueue, processRulePhase, shouldRunLifecycleEffects } from './rules.js';
+import { readStateValue, reduceEffects } from './state.js';
 import { advanceActionTime } from './time.js';
+import {
+  accountEngineTrace, createScriptActionTransaction, executeScriptActivation, makeScriptRandomBridge,
+  scriptDiagnostic, type ScriptActionTransaction, type ScriptExecutionEnvironment, validateScriptEnvironment,
+} from './script-runtime.js';
 import { applyInventoryEffect, inventoryOperationEffect } from '../inventory/index.js';
 import {
   applyDialogueEffect, completeTerminalConversation, prepareDialogueOption, resumeOnReturn, suspendForNavigation,
@@ -70,6 +74,48 @@ function actionSets(world: WorldDocument, snapshot: SessionSnapshot): ActionSet 
 
 export function getAvailableActions(world: WorldDocument, snapshot: SessionSnapshot): ActionSet {
   return freezeDeep(actionSets(world, snapshot));
+}
+
+function inspectAction(
+  id: string,
+  kind: AvailableActionEvaluation['kind'],
+  condition: Condition | undefined,
+  falsePolicy: 'hide' | 'disable' | undefined,
+  world: WorldDocument,
+  snapshot: SessionSnapshot,
+  traceHistory?: AvailabilityTraceHistory,
+): AvailableActionEvaluation {
+  const evaluation = condition
+    ? inspectCondition(world, snapshot, condition, traceHistory)
+    : { result: true, reads: [] };
+  const visibilityPolicy = falsePolicy ?? 'hide';
+  const visible = evaluation.result || visibilityPolicy === 'disable';
+  return {
+    id,
+    kind,
+    condition: condition ?? null,
+    result: evaluation.result,
+    visibilityPolicy,
+    visibility: visible ? 'visible' : 'hidden',
+    enabled: evaluation.result,
+    reads: evaluation.reads,
+  };
+}
+
+/** Read-only inspection of effective node actions and options on the active dialogue line. */
+export function inspectActionAvailability(
+  world: WorldDocument,
+  snapshot: SessionSnapshot,
+  traceHistory?: AvailabilityTraceHistory,
+): AvailableActionsResult {
+  const actions = actionSets(world, snapshot);
+  const choices = actions.choices.map((choice) => inspectAction(choice.id, 'choice', choice.condition, choice.falsePolicy, world, snapshot, traceHistory));
+  const commands = actions.commands.map((command) => inspectAction(command.id, 'command', command.condition, command.falsePolicy, world, snapshot, traceHistory));
+  const active = snapshot.activeConversation;
+  const conversation = active && world.conversations.find((definition) => definition.id === active.conversationId);
+  const line = conversation?.lines.find((candidate) => candidate.id === active?.lineId);
+  const dialogueOptions = (line?.options ?? []).map((option) => inspectAction(option.id, 'dialogue-option', option.condition, option.falsePolicy, world, snapshot, traceHistory));
+  return freezeDeep({ choices, commands, dialogueOptions });
 }
 
 function normalizeWhitespace(value: string): string {
@@ -204,25 +250,27 @@ interface ActionContext {
   readonly trace: TransitionTraceRecord[];
   readonly diagnostics: Diagnostic[];
   readonly events: EventOccurrence[];
+  readonly scriptTransaction?: ScriptActionTransaction;
   effectCount: number;
   didNavigate: boolean;
 }
 
-function addTrace(context: ActionContext, record: Omit<TransitionTraceRecord, 'sequence'>): boolean {
+function addTrace(context: ActionContext, record: Omit<TransitionTraceRecord, 'sequence'>, alreadyAccounted = false): boolean {
   if (context.trace.length >= MAX_TRACE_RECORDS - 1) return false;
+  if (context.scriptTransaction && !alreadyAccounted && !accountEngineTrace(context.scriptTransaction, 1)) return false;
   context.trace.push({ ...record, sequence: context.trace.length });
   return true;
 }
 
-function addTransitionTrace(context: ActionContext, records: readonly TransitionTraceRecord[]): boolean {
+function addTransitionTrace(context: ActionContext, records: readonly TransitionTraceRecord[], alreadyAccounted = false): boolean {
   for (const { sequence: _sequence, ...record } of records) {
-    if (!addTrace(context, record)) return false;
+    if (!addTrace(context, record, alreadyAccounted)) return false;
   }
   return true;
 }
 
 function applyRuleTransition(context: ActionContext, result: TransitionResult): boolean {
-  if (!addTransitionTrace(context, result.trace)) {
+  if (!addTransitionTrace(context, result.trace, true)) {
     fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
     return false;
   }
@@ -251,8 +299,9 @@ function runLifecycle(
   const node = context.world.nodes.find((candidate) => candidate.id === nodeId);
   const lifecycle = node?.lifecycle?.[phase];
   if (!lifecycle) return true;
+  const lifecycleSource: TraceSource = { kind: 'lifecycle', nodeId, phase };
   return shouldRunLifecycleEffects(lifecycle.policy, occurrencesBefore, occurrencesBefore > 0)
-    ? runEffects(context, lifecycle.effects, source, `${reason} (${phase} lifecycle for ${nodeId})`, depth + 1)
+    ? runEffects(context, lifecycle.effects, lifecycleSource, `${reason} (${phase} lifecycle for ${nodeId})`, depth + 1)
     : true;
 }
 
@@ -280,7 +329,7 @@ function navigate(context: ActionContext, edgeId: string, source: TraceSource, r
 
   const currentVisits = context.snapshot.nodeVisitCounts[currentNodeId] ?? 0;
   if (!runLifecycle(context, currentNodeId, 'exit', source, reason, depth, Math.max(0, currentVisits - 1))) return false;
-  if (!applyRuleTransition(context, processRulePhase(context.world, context.snapshot, 'node-exit', source, reason))) return false;
+  if (!applyRuleTransition(context, processRulePhase(context.world, context.snapshot, 'node-exit', source, reason, context.scriptTransaction))) return false;
   if (context.snapshot.currentNodeId !== currentNodeId) {
     fail(context, INVALID_NAVIGATION, `Exit effects changed the current node before navigation edge ${edgeId} was applied.`);
     return false;
@@ -307,14 +356,27 @@ function navigate(context: ActionContext, edgeId: string, source: TraceSource, r
   const lifecycleOccurrences = phase === 'entry' ? previousVisits : Math.max(0, previousVisits - 1);
   if (!runLifecycle(context, target.id, phase, source, reason, depth, lifecycleOccurrences)) return false;
   const rulePhase = phase === 'entry' ? 'node-entry' : 'node-revisit';
-  return applyRuleTransition(context, processRulePhase(context.world, context.snapshot, rulePhase, source, reason));
+  return applyRuleTransition(context, processRulePhase(context.world, context.snapshot, rulePhase, source, reason, context.scriptTransaction));
+}
+
+function scriptOrigin(source: TraceSource): ScriptInvocationOrigin | undefined {
+  switch (source.kind) {
+    case 'action': return { kind: 'action', actionId: source.actionId };
+    case 'rule': return { kind: 'rule', ruleId: source.ruleId };
+    case 'lifecycle': return { kind: 'lifecycle', nodeId: source.nodeId, phase: source.phase };
+    case 'engine':
+    case 'script': return undefined;
+  }
 }
 
 function runEffects(context: ActionContext, effects: readonly Effect[], source: TraceSource, reason: string, depth: number): boolean {
   if (depth > 64) { fail(context, BUDGET_EXCEEDED, 'Nested lifecycle navigation exceeded its depth budget.'); return false; }
   for (const effect of effects) {
     context.effectCount += 1;
-    if (context.effectCount > MAX_EFFECTS_PER_ACTION) { fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_EFFECTS_PER_ACTION} effect budget.`); return false; }
+    if (context.scriptTransaction) context.scriptTransaction.budget.effects += 1;
+    if (context.effectCount > MAX_EFFECTS_PER_ACTION || (context.scriptTransaction && context.scriptTransaction.budget.effects > MAX_EFFECTS_PER_ACTION)) {
+      fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_EFFECTS_PER_ACTION} effect budget.`); return false;
+    }
     if (effect.kind === 'emit-event') {
       if (!addTrace(context, { kind: 'effect-request', source, reason, effect: structuredClone(effect) })) {
         fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
@@ -346,6 +408,60 @@ function runEffects(context: ActionContext, effects: readonly Effect[], source: 
       if (!navigate(context, effect.edgeId, source, reason, depth)) return false;
       continue;
     }
+    if (effect.kind === 'run-script') {
+      if (!addTrace(context, { kind: 'effect-request', source, reason, effect: structuredClone(effect) })) {
+        fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+        return false;
+      }
+      const transaction = context.scriptTransaction!;
+      const origin = scriptOrigin(source);
+      if (!origin) {
+        const diagnostic = scriptDiagnostic(`run-script effect for ${effect.scriptId} has no active script execution context.`);
+        context.diagnostics.push(diagnostic);
+        addTrace(context, { kind: 'diagnostic', source: { kind: 'script', scriptId: effect.scriptId }, reason: diagnostic.message, diagnosticCode: diagnostic.code });
+        return false;
+      }
+      const scriptSource: TraceSource = { kind: 'script', scriptId: effect.scriptId };
+      const random = makeScriptRandomBridge(transaction, context.world, effect.scriptId, () => context.snapshot,
+        (snapshot) => { context.snapshot = snapshot; }, (records) => {
+          if (!addTransitionTrace(context, records, true)) throw scriptDiagnostic('Action exceeded the transition trace budget while applying a random outcome.');
+        });
+      const capabilities = {
+        read: (reference: import('@dungeon-scrivener/model').StateReference) => {
+          const value = readStateValue(context.world, context.snapshot, reference);
+          if (value === undefined) throw scriptDiagnostic(`Script ${effect.scriptId} read unknown state ${reference.scope.kind}:${reference.key}.`);
+          return value;
+        },
+        hasTag: (entityId: string, tag: string) => {
+          if (!context.world.entities.some((entity) => entity.id === entityId)) throw scriptDiagnostic(`Script ${effect.scriptId} queried unknown entity ${entityId}.`);
+          return (context.snapshot.entityTags[entityId] ?? []).includes(tag);
+        },
+        request: (requested: import('@dungeon-scrivener/model').ScriptEffect) => {
+          if (!runEffects(context, [requested], scriptSource, `Script ${effect.scriptId} requested ${requested.kind}.`, depth + 1)) {
+            const diagnostic = context.diagnostics.at(-1);
+            throw Object.assign(new Error(diagnostic?.message ?? `Script ${effect.scriptId} request failed.`), diagnostic ? { diagnostic } : {});
+          }
+        },
+        emit: (eventId: string, payload: import('@dungeon-scrivener/model').JsonRecord) => {
+          transaction.budget.effects += 1;
+          if (transaction.budget.effects > MAX_EFFECTS_PER_ACTION) throw scriptDiagnostic(`Action exceeded the ${MAX_EFFECTS_PER_ACTION} effect budget.`);
+          context.events.push({ eventId, payload, source: `script:${effect.scriptId}` });
+        },
+        ...random,
+      };
+      const execution = executeScriptActivation(transaction, context.world, context.snapshot, effect.scriptId, origin, capabilities);
+      if (!addTransitionTrace(context, execution.trace, true)) {
+        fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
+        return false;
+      }
+      if (!execution.ok) {
+        const diagnostic = execution.diagnostic!;
+        context.diagnostics.push(diagnostic);
+        addTrace(context, { kind: 'diagnostic', source: scriptSource, reason: diagnostic.message, diagnosticCode: diagnostic.code });
+        return false;
+      }
+      continue;
+    }
     const dialogue = applyDialogueEffect(
       context.world, context.snapshot, effect, source, reason,
       (condition, snapshot, event) => evaluateConditionValue(context.world, snapshot, condition, event),
@@ -374,8 +490,8 @@ function runEffects(context: ActionContext, effects: readonly Effect[], source: 
 function finishAction(context: ActionContext, advanceTime = true): TransitionResult {
   if (context.diagnostics.length > 0) return transition(context.original, context.trace, context.diagnostics);
   if (context.events.length > 0) {
-    const rules = processEventQueue(context.world, context.snapshot, context.events, { kind: 'engine', operation: 'action-event-queue' }, 'Events emitted during the action.');
-    if (!addTransitionTrace(context, rules.trace)) {
+    const rules = processEventQueue(context.world, context.snapshot, context.events, { kind: 'engine', operation: 'action-event-queue' }, 'Events emitted during the action.', context.scriptTransaction);
+    if (!addTransitionTrace(context, rules.trace, true)) {
       fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
       return transition(context.original, context.trace, context.diagnostics);
     }
@@ -399,7 +515,7 @@ function finishAction(context: ActionContext, advanceTime = true): TransitionRes
   const timeAdvanced = timeAdvance.snapshot.gameTimeMilliseconds !== context.snapshot.gameTimeMilliseconds;
   context.snapshot = timeAdvance.snapshot;
   if (timeAdvanced) {
-    const timedRules = processRulePhase(context.world, context.snapshot, 'time-advanced', { kind: 'engine', operation: 'action-time-advanced' }, 'Per-action game time advanced.');
+    const timedRules = processRulePhase(context.world, context.snapshot, 'time-advanced', { kind: 'engine', operation: 'action-time-advanced' }, 'Per-action game time advanced.', context.scriptTransaction);
     if (!applyRuleTransition(context, timedRules)) return transition(context.original, context.trace, context.diagnostics);
   }
   if (context.didNavigate) {
@@ -439,7 +555,9 @@ function validParameters(command: CommandDefinition, parameters: Readonly<Record
   });
 }
 
-export function dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, input: ActionInput): TransitionResult {
+export function dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, input: ActionInput, scriptEnvironment?: ScriptExecutionEnvironment): TransitionResult {
+  const scriptDiagnostics = scriptEnvironment ? validateScriptEnvironment(world, scriptEnvironment) : [];
+  if (scriptDiagnostics.length > 0) return transition(snapshot, [], scriptDiagnostics);
   const actionSet = actionSets(world, snapshot);
   let effects: readonly Effect[];
   let navigationEdgeId: string | undefined;
@@ -468,20 +586,26 @@ export function dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, 
     actionId = command.id;
   }
   const source: TraceSource = { kind: 'action', actionId };
-  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false };
+  const context: ActionContext = {
+    world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false,
+    scriptTransaction: createScriptActionTransaction(scriptEnvironment),
+  };
   addTrace(context, { kind: 'action', source, reason: `Player selected action ${actionId}.` });
-  if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Action ${actionId} starts.`))) return finishAction(context);
+  if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Action ${actionId} starts.`, context.scriptTransaction))) return finishAction(context);
   if (!runEffects(context, effects, source, `Effects for action ${actionId}.`, 0)) return finishAction(context);
   if (navigationEdgeId && !navigate(context, navigationEdgeId, source, `Action ${actionId} navigates by edge ${navigationEdgeId}.`, 0)) return finishAction(context);
   return finishAction(context);
 }
 
 /** Applies the entry/revisit lifecycle when a newly created session enters its starting node. */
-export function enterSessionNode(world: WorldDocument, snapshot: SessionSnapshot): TransitionResult {
+export function enterSessionNode(world: WorldDocument, snapshot: SessionSnapshot, scriptEnvironment?: ScriptExecutionEnvironment): TransitionResult {
   const node = world.nodes.find((candidate) => candidate.id === snapshot.currentNodeId);
   if (!node || !node.visitable) return transition(snapshot, [], [issue(INVALID_NAVIGATION, `Starting node ${snapshot.currentNodeId} is missing or nonvisitable.`)]);
   const source: TraceSource = { kind: 'engine', operation: 'session-entry' };
-  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false };
+  const context: ActionContext = {
+    world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false,
+    scriptTransaction: createScriptActionTransaction(scriptEnvironment),
+  };
   const previousVisits = context.snapshot.nodeVisitCounts[node.id] ?? 0;
   if (previousVisits >= Number.MAX_SAFE_INTEGER) return transition(snapshot, [], [issue(BUDGET_EXCEEDED, `Visit count for node ${node.id} exceeds the safe integer limit.`)]);
   const phase = previousVisits === 0 ? 'entry' : 'revisit';
@@ -495,7 +619,7 @@ export function enterSessionNode(world: WorldDocument, snapshot: SessionSnapshot
   const occurrenceCount = phase === 'entry' ? previousVisits : Math.max(0, previousVisits - 1);
   if (!runLifecycle(context, node.id, phase, source, `Session enters starting node ${node.id}.`, 0, occurrenceCount)) return finishAction(context, false);
   const rulePhase = phase === 'entry' ? 'node-entry' : 'node-revisit';
-  if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, rulePhase, source, `Session enters starting node ${node.id}.`))) return finishAction(context, false);
+  if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, rulePhase, source, `Session enters starting node ${node.id}.`, context.scriptTransaction))) return finishAction(context, false);
   return finishAction(context, false);
 }
 
@@ -503,7 +627,7 @@ function inputTransition(snapshot: SessionSnapshot, resolution: PlayerInputResol
   return Object.freeze({ ...transitionResult, resolution });
 }
 
-function dispatchInventoryInput(world: WorldDocument, snapshot: SessionSnapshot, operation: Extract<PlayerInput, { kind: 'inventory' }>['operation']): PlayerInputTransitionResult {
+function dispatchInventoryInput(world: WorldDocument, snapshot: SessionSnapshot, operation: Extract<PlayerInput, { kind: 'inventory' }>['operation'], scriptEnvironment?: ScriptExecutionEnvironment): PlayerInputTransitionResult {
   const effect = inventoryOperationEffect(operation);
   if (!effect) {
     const diagnostic = issue(INVALID_INPUT, 'Inventory input does not match a supported operation shape.');
@@ -511,9 +635,12 @@ function dispatchInventoryInput(world: WorldDocument, snapshot: SessionSnapshot,
   }
   const actionId = `inventory-${operation.kind}`;
   const source: TraceSource = { kind: 'action', actionId };
-  const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false };
+  const context: ActionContext = {
+    world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false,
+    scriptTransaction: createScriptActionTransaction(scriptEnvironment),
+  };
   addTrace(context, { kind: 'action', source, reason: `Player requested inventory operation ${operation.kind}.` });
-  if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Inventory ${operation.kind} starts.`))) {
+  if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Inventory ${operation.kind} starts.`, context.scriptTransaction))) {
     const result = finishAction(context);
     return inputTransition(snapshot, { kind: 'invalid-inventory-input', diagnostic: result.diagnostics.diagnostics[0]! }, result);
   }
@@ -527,8 +654,10 @@ function dispatchInventoryInput(world: WorldDocument, snapshot: SessionSnapshot,
   return inputTransition(snapshot, { kind: 'inventory', operation }, result);
 }
 
-export function dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnapshot, input: PlayerInput): PlayerInputTransitionResult {
-  if (input.kind === 'inventory') return dispatchInventoryInput(world, snapshot, input.operation);
+export function dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnapshot, input: PlayerInput, scriptEnvironment?: ScriptExecutionEnvironment): PlayerInputTransitionResult {
+  const scriptDiagnosticResult = scriptEnvironment ? validateScriptEnvironment(world, scriptEnvironment)[0] : undefined;
+  if (scriptDiagnosticResult) return inputTransition(snapshot, { kind: 'invalid-input', diagnostic: scriptDiagnosticResult }, transition(snapshot, [], [scriptDiagnosticResult]));
+  if (input.kind === 'inventory') return dispatchInventoryInput(world, snapshot, input.operation, scriptEnvironment);
   if (input.kind === 'choice') {
     const choice = actionSets(world, snapshot).choices.find((candidate) => candidate.id === input.actionId);
     if (choice && choice.falsePolicy === 'disable') {
@@ -538,7 +667,7 @@ export function dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnaps
         }
       } catch { /* dispatchAction returns the actionable condition diagnostic below. */ }
     }
-    const result = dispatchAction(world, snapshot, input);
+    const result = dispatchAction(world, snapshot, input, scriptEnvironment);
     const diagnostic = result.diagnostics.diagnostics[0];
     if (diagnostic) return inputTransition(snapshot, { kind: 'invalid-input', diagnostic }, result);
     return inputTransition(snapshot, { kind: 'choice', actionId: input.actionId }, result);
@@ -546,9 +675,12 @@ export function dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnaps
   if (input.kind === 'dialogue-option') {
     const actionId = `dialogue-${input.optionId}`;
     const source: TraceSource = { kind: 'action', actionId };
-    const context: ActionContext = { world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false };
+    const context: ActionContext = {
+      world, original: snapshot, snapshot, trace: [], diagnostics: [], events: [], effectCount: 0, didNavigate: false,
+      scriptTransaction: createScriptActionTransaction(scriptEnvironment),
+    };
     addTrace(context, { kind: 'action', source, reason: `Player selected dialogue option ${input.optionId}.` });
-    if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Dialogue option ${input.optionId} starts.`))) {
+    if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Dialogue option ${input.optionId} starts.`, context.scriptTransaction))) {
       const result = finishAction(context);
       return inputTransition(snapshot, { kind: 'invalid-dialogue-option', diagnostic: result.diagnostics.diagnostics[0]! }, result);
     }
@@ -612,7 +744,7 @@ export function dispatchPlayerInput(world: WorldDocument, snapshot: SessionSnaps
     return inputTransition(snapshot, resolution, transition(snapshot, [], []));
   }
   const action = matched.action;
-  const result = dispatchAction(world, snapshot, action);
+  const result = dispatchAction(world, snapshot, action, scriptEnvironment);
   const diagnostic = result.diagnostics.diagnostics[0];
   if (diagnostic) return inputTransition(snapshot, { kind: 'invalid-input', diagnostic }, result);
   return inputTransition(snapshot, { kind: 'command', action, normalizedText: matched.normalizedText }, result);

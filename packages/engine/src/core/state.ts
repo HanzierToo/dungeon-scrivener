@@ -68,6 +68,11 @@ function fieldForReference(world: WorldDocument, snapshot: SessionSnapshot, refe
   return field ? { valueType: field.valueType, value: recordForReference(snapshot, reference)?.[reference.key] } : undefined;
 }
 
+/** Reads one declared scalar from the current provisional session state. */
+export function readStateValue(world: WorldDocument, snapshot: SessionSnapshot, reference: StateReference): Scalar | undefined {
+  return fieldForReference(world, snapshot, reference)?.value;
+}
+
 function matchesType(value: Scalar, valueType: ValueType): boolean {
   if (typeof valueType === 'string') {
     switch (valueType) {

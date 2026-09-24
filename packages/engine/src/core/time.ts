@@ -2,6 +2,7 @@ import type {
   ClockInput, Diagnostic, PageVisibility, SessionSnapshot, TraceSource, TransitionResult, TransitionTraceRecord, WorldDocument,
 } from '@dungeon-scrivener/model';
 import { processRulePhase } from './rules.js';
+import { accountEngineTrace, createScriptActionTransaction, type ScriptExecutionEnvironment, validateScriptEnvironment } from './script-runtime.js';
 
 const INVALID_TIME = 'DS-ENG-010';
 const INVALID_CLOCK = 'DS-ENG-011';
@@ -58,13 +59,17 @@ export function advanceActionTime(
 }
 
 /** Applies one host-supplied elapsed-time observation without reading browser globals. */
-export function observeClock(world: WorldDocument, snapshot: SessionSnapshot, input: ClockInput): TransitionResult {
+export function observeClock(world: WorldDocument, snapshot: SessionSnapshot, input: ClockInput, scriptEnvironment?: ScriptExecutionEnvironment): TransitionResult {
   if (!['tick', 'visibility-change', 'focus-change', 'resume'].includes(input.kind) ||
       !validTimestamp(input.wallClockEpochMilliseconds) || (input.visibility !== 'visible' && input.visibility !== 'hidden') || typeof input.focused !== 'boolean') {
     return result(snapshot, [], [issue(INVALID_CLOCK, 'Clock input has an invalid timestamp, visibility, or focus value.')]);
   }
   if (!Number.isSafeInteger(world.settings.time.maxCatchUpMilliseconds) || world.settings.time.maxCatchUpMilliseconds < 0 || world.settings.time.maxCatchUpMilliseconds > 86_400_000) {
     return result(snapshot, [], [issue(INVALID_CLOCK, 'Maximum elapsed-time catch-up must be between zero and one day.')]);
+  }
+  if (scriptEnvironment) {
+    const mismatch = validateScriptEnvironment(world, scriptEnvironment);
+    if (mismatch.length > 0) return result(snapshot, [], mismatch);
   }
   const { wallClockEpochMilliseconds: now } = input;
   if (world.settings.time.mode === 'per-action') {
@@ -127,7 +132,9 @@ export function observeClock(world: WorldDocument, snapshot: SessionSnapshot, in
   };
   const observed = result(next, [trace]);
   if (credited === 0) return observed;
-  const rules = processRulePhase(world, next, 'time-advanced', { kind: 'engine', operation: 'elapsed-time-advanced' }, 'Elapsed game time advanced after a clock observation.');
+  const transaction = createScriptActionTransaction(scriptEnvironment);
+  accountEngineTrace(transaction, observed.trace.length);
+  const rules = processRulePhase(world, next, 'time-advanced', { kind: 'engine', operation: 'elapsed-time-advanced' }, 'Elapsed game time advanced after a clock observation.', transaction);
   const combined = [...observed.trace, ...rules.trace].map((record, sequence) => ({ ...record, sequence }));
   if (rules.diagnostics.diagnostics.length > 0) return result(snapshot, combined, rules.diagnostics.diagnostics);
   return result(rules.snapshot, combined);
