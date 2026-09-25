@@ -33,6 +33,7 @@ import { updateNodeDefinition } from './commands.js';
 
 export interface ApprenticeFormsProps {
   readonly world: WorldDocument;
+  readonly view?: 'scene' | 'world' | 'all';
   readonly selectedNodeId?: string;
   readonly onWorldChange: (world: WorldDocument) => void;
   readonly project?: ProjectVfsSnapshot | undefined;
@@ -241,6 +242,8 @@ function ActionEditors({ actions, onChange, world }: { actions: ActionSet; onCha
 }
 
 function NodeEditor({ world, node, onChange, contentSettings }: { world: WorldDocument; node: NodeDefinition; onChange: (node: NodeDefinition) => void; contentSettings: ContentSettings }) {
+  const defaultTitleLocale = contentSettings.locales?.find(locale => locale.locale === contentSettings.defaultLocale);
+  const titleKey = node.title.kind === 'locale-key' ? node.title.key : undefined;
   const inheritedActions = node.inheritance?.defaults && node.parentId !== null
     ? resolveNodeActions(world, node.parentId).value ?? world.actionDefaults
     : world.actionDefaults;
@@ -252,6 +255,10 @@ function NodeEditor({ world, node, onChange, contentSettings }: { world: WorldDo
   const localCommands = node.actions?.commands ?? [];
   return <section><h2>Scene content</h2>
     <TextSourceField label="Title" value={node.title} onChange={(title) => onChange({ ...node, title })} />
+    {titleKey !== undefined && defaultTitleLocale && contentSettings.onLocalesChange && <label>Title text ({defaultTitleLocale.locale})
+      <input value={defaultTitleLocale.strings[titleKey] ?? ''} onChange={event => contentSettings.onLocalesChange?.((contentSettings.locales ?? []).map(locale => locale.locale === defaultTitleLocale.locale
+        ? { ...locale, strings: { ...locale.strings, [titleKey]: event.target.value } } : locale))} />
+    </label>}
     <RichContentEditor value={node.content} onChange={(content) => onChange({ ...node, content })} world={world} {...contentSettings} />
     <label><input type="checkbox" checked={node.inheritance?.defaults ?? false} onChange={(event) => onChange({ ...node, inheritance: { defaults: event.target.checked, rules: node.inheritance?.rules ?? false } })} /> Inherit action defaults</label>
     <label><input type="checkbox" checked={node.inheritance?.rules ?? false} onChange={(event) => onChange({ ...node, inheritance: { defaults: node.inheritance?.defaults ?? false, rules: event.target.checked } })} /> Inherit rules</label>
@@ -379,12 +386,13 @@ function TimeEditor({ world, onWorldChange }: { world: WorldDocument; onWorldCha
   </section>;
 }
 
-export function ApprenticeForms({ world, selectedNodeId, onWorldChange, project, locales, defaultLocale, assets, mediaAssets, onLocalesChange, onImportAsset }: ApprenticeFormsProps) {
+export function ApprenticeForms({ world, view = 'all', selectedNodeId, onWorldChange, project, locales, defaultLocale, assets, mediaAssets, onLocalesChange, onImportAsset }: ApprenticeFormsProps) {
   const node = useMemo(() => world.nodes.find((candidate) => candidate.id === selectedNodeId), [world, selectedNodeId]);
   const updateNode = (next: NodeDefinition) => onWorldChange(updateNodeDefinition(world, next.id, () => next) ?? world);
   const contentSettings: ContentSettings = { project, locales, defaultLocale, assets, mediaAssets, onLocalesChange, onImportAsset };
   return <div aria-label="Apprentice forms" style={{ display: 'grid', gap: 18, padding: 16, overflow: 'auto' }}>
-    {node ? <NodeEditor world={world} node={node} onChange={updateNode} contentSettings={contentSettings} /> : <p>Select a node to edit its content and actions.</p>}
+    {view !== 'world' && (node ? <NodeEditor world={world} node={node} onChange={updateNode} contentSettings={contentSettings} /> : <p>Select a node to edit its content and actions.</p>)}
+    {view !== 'scene' && <>
     <ApprenticeAuthorSettings world={world} project={project} assets={assets} onWorldChange={onWorldChange} />
     <section><h2>Game action defaults</h2><p>Nodes may inherit these choices and commands independently.</p><ActionEditors actions={world.actionDefaults} world={world} onChange={(actionDefaults) => onWorldChange({ ...world, actionDefaults })} /></section>
     <WorldStateEditor world={world} onWorldChange={onWorldChange} />
@@ -393,5 +401,6 @@ export function ApprenticeForms({ world, selectedNodeId, onWorldChange, project,
     <EventActorEditors world={world} onWorldChange={onWorldChange} />
     <InventoryEditor world={world} onWorldChange={onWorldChange} />
     <TimeEditor world={world} onWorldChange={onWorldChange} />
+    </>}
   </div>;
 }

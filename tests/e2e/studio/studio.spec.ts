@@ -61,10 +61,94 @@ async function acknowledgeWarnings(page: import('@playwright/test').Page): Promi
   if (await acknowledge.isVisible().catch(() => false)) await acknowledge.click();
 }
 
+async function dismissTourInvite(page: import('@playwright/test').Page): Promise<void> {
+  await page.getByRole('dialog', { name: 'Find your way around the studio' }).getByRole('button', { name: 'Not now' }).click();
+}
+
+test('new-project tour is optional, guided, replayable, and remembered', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  const invite = page.getByRole('dialog', { name: 'Find your way around the studio' });
+  await expect(invite).toBeVisible();
+  await invite.getByRole('button', { name: 'Start tour' }).click();
+  const tour = page.getByRole('dialog', { name: 'One project, two ways to write' });
+  await expect(tour).toBeVisible();
+  await expect(page.locator('.tour-spotlight')).toBeVisible();
+  await tour.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByRole('dialog', { name: 'Start with the story files' })).toBeVisible();
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByRole('dialog', { name: 'See where the story leads' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Apprentice' })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.tour-layer')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('dungeon-scrivener-studio-tour-v1'))).toBe('skipped');
+
+  await page.getByRole('button', { name: 'Take the tour' }).click();
+  for (let index = 0; index < 5; index += 1) await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByRole('button', { name: 'Finish tour' }).click();
+  await expect(page.locator('.tour-layer')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('dungeon-scrivener-studio-tour-v1'))).toBe('finished');
+
+  await page.getByRole('button', { name: 'Projects' }).click();
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await expect(invite).not.toBeVisible();
+});
+
+test('narrow-screen tour keeps its spotlight and controls on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await page.getByRole('dialog', { name: 'Find your way around the studio' }).getByRole('button', { name: 'Start tour' }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const target = document.querySelector('[data-tour="project-heading"]')?.getBoundingClientRect();
+    const spotlight = document.querySelector('.tour-spotlight')?.getBoundingClientRect();
+    const card = document.querySelector('.tour-card')?.getBoundingClientRect();
+    return Boolean(target && spotlight && card && target.top >= 0 && target.bottom < innerHeight && Math.abs(target.top - spotlight.top) < 20 && card.bottom <= innerHeight && document.documentElement.scrollWidth <= innerWidth);
+  })).toBe(true);
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByRole('dialog', { name: 'Start with the story files' })).toBeVisible();
+  await page.getByRole('button', { name: 'Exit tour' }).click();
+  await page.getByRole('button', { name: 'Apprentice' }).click();
+  await expect.poll(() => page.locator('.react-flow__node').evaluateAll(nodes => {
+    const first = nodes[0]?.getBoundingClientRect();
+    const second = nodes[1]?.getBoundingClientRect();
+    return Boolean(first && second && second.y > first.y && first.width > 100);
+  })).toBe(true);
+});
+
+test('Apprentice inspector edits a scene and keeps the graph in sync', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await dismissTourInvite(page);
+  await page.getByRole('button', { name: 'Apprentice' }).click();
+  const inspector = page.getByLabel('Story inspector');
+  await expect(inspector.getByRole('tab', { name: 'Scene' })).toHaveAttribute('aria-selected', 'true');
+  await inspector.getByRole('textbox', { name: 'Title text (en-GB)' }).fill('The First Gate');
+  await expect(page.getByText('Scene: The First Gate')).toBeVisible();
+  await page.getByRole('button', { name: 'Add scene' }).click();
+  await inspector.getByRole('group', { name: 'Title' }).getByRole('textbox', { name: 'Text', exact: true }).fill('Moonlit Bridge');
+  await expect(page.getByText('Scene: Moonlit Bridge')).toBeVisible();
+  await inspector.getByRole('tab', { name: 'World' }).click();
+  await expect(inspector.getByRole('heading', { name: 'State definitions' })).toBeVisible();
+  await inspector.getByRole('tab', { name: 'Scene' }).click();
+  await expect(inspector.getByRole('textbox', { name: 'Text', exact: true }).first()).toHaveValue('Moonlit Bridge');
+  await page.getByRole('button', { name: 'Sage' }).click();
+  await expect(page.getByLabel('Editor for world.json')).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download project ZIP' }).click();
+  await acknowledgeWarnings(page);
+  const saved = unzipSync(new Uint8Array(await readFile((await (await download).path())!)));
+  const savedWorld = JSON.parse(strFromU8(saved['world.json']!)) as { nodes: { title: { text?: string } }[] };
+  const savedLocale = JSON.parse(strFromU8(saved['locales/en-GB.json']!)) as { strings: Record<string, string> };
+  expect(savedWorld.nodes.some(node => node.title.text === 'Moonlit Bridge')).toBe(true);
+  expect(savedLocale.strings['gate-title']).toBe('The First Gate');
+});
+
 test('create, edit in Sage and Apprentice, reload offline, and round-trip a project ZIP', async ({ page, context }) => {
   await page.goto('/');
   page.on('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Create project' }).click();
+  await dismissTourInvite(page);
   await expect(page.getByText('The Lantern Crossing', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Playtest' }).click();
   await acknowledgeWarnings(page);
@@ -317,6 +401,7 @@ test('keyboard skip link and nonblocking unsaved-work reminder are usable', asyn
   await page.clock.install();
   await page.goto('/');
   await page.getByRole('button', { name: 'Create project' }).click();
+  await dismissTourInvite(page);
   const skipLink = page.getByRole('link', { name: 'Skip to project workspace' });
   await skipLink.focus();
   await expect(skipLink).toBeFocused();

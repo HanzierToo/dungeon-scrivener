@@ -215,12 +215,13 @@ export function diagnoseSageScript(source: string, path: string, view?: EditorVi
 export interface SageModeProps {
   readonly workspace: SageWorkspace;
   readonly onStateChange?: (state: SageWorkspaceState) => void;
+  readonly showExport?: boolean;
 }
 
 /** File-tree IDE view. File bytes remain in the VFS while tabs are switched. */
-export function SageMode({ workspace, onStateChange }: SageModeProps): React.ReactElement {
+export function SageMode({ workspace, onStateChange, showExport = true }: SageModeProps): React.ReactElement {
   const [state, setState] = useState(workspace.getState());
-  const [tabs, setTabs] = useState<string[]>([]);
+  const [tabs, setTabs] = useState<string[]>(() => workspace.getState().activePath ? [workspace.getState().activePath!] : []);
   const [pathInput, setPathInput] = useState('');
   const editorHost = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | undefined>(undefined);
@@ -293,11 +294,11 @@ export function SageMode({ workspace, onStateChange }: SageModeProps): React.Rea
       React.createElement('label', null, 'New path', React.createElement('input', { value: pathInput, onChange: event => setPathInput(event.currentTarget.value) })),
       React.createElement('button', { type: 'button', onClick: () => create(false) }, 'New file'),
       React.createElement('button', { type: 'button', onClick: () => create(true) }, 'New folder'),
-      React.createElement('button', { type: 'button', onClick: () => { void workspace.exportZip().then(bytes => {
+      showExport ? React.createElement('button', { type: 'button', onClick: () => { void workspace.exportZip().then(bytes => {
         const zipBytes = new Uint8Array(bytes);
         const url = URL.createObjectURL(new Blob([zipBytes.buffer], { type: 'application/zip' }));
         const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'project.zip'; anchor.click(); URL.revokeObjectURL(url);
-      }); } }, 'Export project ZIP')),
+      }); } }, 'Export project ZIP') : null),
     React.createElement('main', { className: 'sage-editor-area' },
       React.createElement('nav', { 'aria-label': 'Open files', role: 'tablist' }, ...tabs.map(path => React.createElement('button', {
         key: path, type: 'button', role: 'tab', 'aria-selected': state.activePath === path, onClick: () => open(path)

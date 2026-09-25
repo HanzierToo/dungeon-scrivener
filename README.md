@@ -20,7 +20,8 @@ Open the local URL printed by Vite, normally `http://127.0.0.1:5173`. The portab
 ## Make a first game
 
 1. Select **Create project**, enter a title and a semantic game version such as `1.0.0`, and open the starter story. You can also **Import project ZIP** to resume an existing authoring project.
-2. Start in **Sage** to inspect the files. Open `world.json` to see the starter scenes, choices, and navigation edges. Switch to **Apprentice** to inspect or edit the same world as a graph and forms. Changes in either mode belong to one project.
+   On your first new project in this browser, choose **Start tour** for a short guided look around the Studio, or **Not now** to go straight to work. **Take the tour** in the workspace can replay it later.
+2. Start in **Apprentice** to inspect the scene map and edit the selected scene in the inspector. Switch to **Sage** to open `world.json` and work directly with the starter scenes, choices, and navigation edges. Changes in either mode belong to one project.
 3. Choose **Playtest** to try inputs and inspect the isolated session, state, and engine trace. Choose **Play** to see the normal player interface. Fix blocking issues shown in **Project diagnostics** before exporting.
 4. Choose **Download project ZIP** to keep an editable copy outside browser storage. Studio also keeps a local recovery copy and reminds you about unsaved work, but the ZIP is the deliberate portable authoring save.
 5. Choose **Export game ZIP** to make a playable copy. Extract the ZIP and open its `index.html` directly in a supported browser. The optional README downloads beside the game ZIP.
