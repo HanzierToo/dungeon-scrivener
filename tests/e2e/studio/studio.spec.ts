@@ -74,20 +74,34 @@ test('new-project tour is optional, guided, replayable, and remembered', async (
   const tour = page.getByRole('dialog', { name: 'One project, two ways to write' });
   await expect(tour).toBeVisible();
   await expect(page.locator('.tour-spotlight')).toBeVisible();
+  await expect(page.locator('body')).toHaveCSS('overflow', 'hidden');
+  const scrollBeforeWheel = await page.evaluate(() => window.scrollY);
+  await page.mouse.move(1, 1);
+  await page.mouse.wheel(0, 500);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforeWheel);
   await tour.getByRole('button', { name: 'Next' }).click();
-  await expect(page.getByRole('dialog', { name: 'Start with the story files' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Apprentice or Sage?' })).toBeVisible();
   await page.getByRole('button', { name: 'Next' }).click();
   await expect(page.getByRole('dialog', { name: 'See where the story leads' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Apprentice' })).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');
   await expect(page.locator('.tour-layer')).toHaveCount(0);
+  await expect(page.locator('body')).not.toHaveCSS('overflow', 'hidden');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('dungeon-scrivener-studio-tour-v1'))).toBe('skipped');
 
   await page.getByRole('button', { name: 'Take the tour' }).click();
-  for (let index = 0; index < 5; index += 1) await page.getByRole('button', { name: 'Next' }).click();
+  for (let index = 1; index <= 6; index += 1) {
+    await expect(page.locator('.tour-progress')).toHaveAttribute('aria-label', `Step ${index} of 7`);
+    await page.getByRole('button', { name: 'Next' }).click();
+  }
+  await expect(page.locator('.tour-progress')).toHaveAttribute('aria-label', 'Step 7 of 7');
   await page.getByRole('button', { name: 'Finish tour' }).click();
   await expect(page.locator('.tour-layer')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('dungeon-scrivener-studio-tour-v1'))).toBe('finished');
+  await expect(page.getByLabel('Game tutorial invitation')).toBeVisible();
+  await page.getByLabel('Game tutorial invitation').getByRole('button', { name: 'Start tutorial' }).click();
+  await expect(page.getByRole('dialog', { name: 'Start with a scene' })).toBeVisible();
+  await page.getByRole('button', { name: 'Exit tour' }).click();
 
   await page.getByRole('button', { name: 'Projects' }).click();
   await page.getByRole('button', { name: 'Create project' }).click();
@@ -106,7 +120,7 @@ test('narrow-screen tour keeps its spotlight and controls on screen', async ({ p
     return Boolean(target && spotlight && card && target.top >= 0 && target.bottom < innerHeight && Math.abs(target.top - spotlight.top) < 20 && card.bottom <= innerHeight && document.documentElement.scrollWidth <= innerWidth);
   })).toBe(true);
   await page.getByRole('button', { name: 'Next' }).click();
-  await expect(page.getByRole('dialog', { name: 'Start with the story files' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Apprentice or Sage?' })).toBeVisible();
   await page.getByRole('button', { name: 'Exit tour' }).click();
   await page.getByRole('button', { name: 'Apprentice' }).click();
   await expect.poll(() => page.locator('.react-flow__node').evaluateAll(nodes => {
@@ -114,6 +128,91 @@ test('narrow-screen tour keeps its spotlight and controls on screen', async ({ p
     const second = nodes[1]?.getBoundingClientRect();
     return Boolean(first && second && second.y > first.y && first.width > 100);
   })).toBe(true);
+});
+
+test('Sage preference leads into the file-based game tutorial', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  const invite = page.getByRole('dialog', { name: 'Find your way around the studio' });
+  await invite.getByRole('radio', { name: 'Sage · source files' }).check();
+  await invite.getByRole('button', { name: 'Start tour' }).click();
+  for (let index = 1; index <= 6; index += 1) {
+    await expect(page.locator('.tour-progress')).toHaveAttribute('aria-label', `Step ${index} of 7`);
+    await page.getByRole('button', { name: 'Next' }).click();
+  }
+  await expect(page.locator('.tour-progress')).toHaveAttribute('aria-label', 'Step 7 of 7');
+  await page.getByRole('button', { name: 'Finish tour' }).click();
+  await expect(page.getByRole('button', { name: 'Sage' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByLabel('Game tutorial invitation').getByRole('button', { name: 'Start tutorial' }).click();
+  await expect(page.getByRole('dialog', { name: 'Find the game files' })).toBeVisible();
+  await page.getByRole('button', { name: 'Exit tour' }).click();
+});
+
+test('Sage Explorer supports hierarchy, context actions, closable tabs, and editor indentation', async ({ page }) => {
+  await page.goto('/');
+  page.on('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await dismissTourInvite(page);
+  await page.getByRole('button', { name: 'Sage' }).click();
+  const explorer = page.getByRole('complementary', { name: 'Project files' });
+  await expect(explorer.getByRole('button', { name: 'locales', exact: true })).toBeVisible();
+  await expect(explorer.getByRole('button', { name: 'en-GB.json', exact: true })).toBeVisible();
+  await explorer.getByRole('combobox', { name: 'Explorer view' }).selectOption('flat');
+  await expect(explorer.getByRole('button', { name: 'locales/en-GB.json', exact: true })).toBeVisible();
+  await explorer.getByRole('combobox', { name: 'Explorer sort' }).selectOption('type');
+  await explorer.getByRole('button', { name: 'locales/en-GB.json', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'en-GB.json' })).toBeVisible();
+  await page.getByRole('button', { name: 'Apprentice' }).click();
+  await page.getByRole('button', { name: 'Sage' }).click();
+  await expect(page.getByRole('tab', { name: 'en-GB.json' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close locales/en-GB.json' }).click();
+  await expect(page.getByRole('tab', { name: 'en-GB.json' })).toHaveCount(0);
+  await explorer.getByRole('textbox', { name: 'New path' }).fill('notes.txt');
+  await explorer.getByRole('button', { name: 'New file' }).click();
+  const editor = page.locator('.cm-content');
+  await editor.fill('First line');
+  await editor.press('Home');
+  await editor.press('Tab');
+  await expect(editor).toContainText(/\s+First line/u);
+  await explorer.getByRole('button', { name: 'notes.txt', exact: true }).click({ button: 'right' });
+  await expect(page.getByRole('menu', { name: 'Actions for notes.txt' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await expect(explorer.getByRole('button', { name: 'notes.txt', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: 'notes.txt' })).toHaveCount(0);
+});
+
+test('Playtest starts with scene actions and offers its own dismissible tour', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await dismissTourInvite(page);
+  await page.getByRole('button', { name: 'Playtest' }).click();
+  await acknowledgeWarnings(page);
+  await expect(page.getByRole('region', { name: 'Current test scene' })).toContainText('The Old Gate');
+  await expect(page.getByRole('button', { name: 'Raise the lantern and open the gate' })).toBeVisible();
+  await page.getByRole('button', { name: 'Tour this view' }).click();
+  await expect(page.getByRole('dialog', { name: 'Try a player action' })).toBeVisible();
+  await page.getByRole('button', { name: 'Exit tour' }).click();
+  await expect(page.locator('.tour-layer')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Raise the lantern and open the gate' }).click();
+  await expect(page.getByRole('region', { name: 'Current test scene' })).toContainText('The Stone Bridge');
+});
+
+test('Apprentice and Play each offer a replayable view tour', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await dismissTourInvite(page);
+  await page.getByRole('button', { name: 'Tour this view' }).click();
+  await expect(page.getByRole('dialog', { name: 'Follow the scenes' })).toBeVisible();
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByRole('dialog', { name: 'Add and connect' })).toBeVisible();
+  await page.getByRole('button', { name: 'Exit tour' }).click();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await acknowledgeWarnings(page);
+  await page.getByRole('button', { name: 'Tour this view' }).click();
+  await expect(page.getByRole('dialog', { name: 'Read the scene' })).toBeVisible();
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByRole('dialog', { name: 'Choose an action' })).toBeVisible();
+  await page.getByRole('button', { name: 'Exit tour' }).click();
 });
 
 test('Apprentice inspector edits a scene and keeps the graph in sync', async ({ page }) => {
@@ -142,6 +241,60 @@ test('Apprentice inspector edits a scene and keeps the graph in sync', async ({ 
   const savedLocale = JSON.parse(strFromU8(saved['locales/en-GB.json']!)) as { strings: Record<string, string> };
   expect(savedWorld.nodes.some(node => node.title.text === 'Moonlit Bridge')).toBe(true);
   expect(savedLocale.strings['gate-title']).toBe('The First Gate');
+});
+
+test('Apprentice map keeps dragged positions and connects scenes through handles', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await dismissTourInvite(page);
+  const graph = page.getByLabel('Apprentice node graph');
+  const entry = graph.locator('.react-flow__node').filter({ hasText: 'Scene: The Old Gate' });
+  await page.getByRole('button', { name: 'Add scene' }).click();
+  const newScene = graph.locator('.react-flow__node').filter({ hasText: 'Scene: New scene' });
+  await expect(newScene).toHaveClass(/selected/);
+  await expect(newScene.getByText('Selected')).toBeVisible();
+  await expect(page.locator('#project-diagnostics')).toContainText('DS-MOD-031');
+
+  await graph.evaluate(element => window.scrollBy(0, element.getBoundingClientRect().top - 80));
+  const before = await newScene.boundingBox();
+  expect(before).not.toBeNull();
+  await page.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before!.x + before!.width / 2 + 80, before!.y + before!.height / 2 + 20, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await newScene.boundingBox())?.x).toBeGreaterThan(before!.x + 40);
+
+  const source = await entry.locator('.react-flow__handle-bottom').boundingBox();
+  const target = await newScene.locator('.react-flow__handle-top').boundingBox();
+  expect(source).not.toBeNull();
+  expect(target).not.toBeNull();
+  await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target!.x + target!.width / 2, target!.y + target!.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(() => graph.locator('.react-flow__edge').count()).toBe(3);
+  await expect(page.locator('#project-diagnostics')).not.toContainText('DS-MOD-031');
+
+  const inspector = page.getByLabel('Story inspector');
+  await inspector.getByRole('button', { name: 'Add choice' }).click();
+  const checkboxRows = inspector.locator('label:has(> input[type="checkbox"])');
+  expect(await checkboxRows.count()).toBeGreaterThanOrEqual(3);
+  expect(await checkboxRows.evaluateAll(rows => rows.every(row => {
+    const box = row.querySelector('input[type="checkbox"]')!.getBoundingClientRect();
+    const label = row.getBoundingClientRect();
+    return getComputedStyle(row).display === 'flex' && Math.abs(box.y + box.height / 2 - (label.y + label.height / 2)) < 4;
+  }))).toBe(true);
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download project ZIP' }).click();
+  await acknowledgeWarnings(page);
+  const saved = unzipSync(new Uint8Array(await readFile((await (await download).path())!)));
+  const world = JSON.parse(strFromU8(saved['world.json']!)) as { nodes: { id: string; title: { text?: string } }[]; navigationEdges: { fromNodeId: string; toNodeId: string }[] };
+  const layout = JSON.parse(strFromU8(saved['studio/graph-layout.json']!)) as { positions: Record<string, { x: number; y: number }> };
+  const added = world.nodes.find(node => node.title.text === 'New scene');
+  expect(added).toBeDefined();
+  expect(layout.positions[added!.id]?.x).toBeGreaterThan(320);
+  expect(world.navigationEdges.some(edge => edge.fromNodeId === world.nodes[0]!.id && edge.toNodeId === added!.id)).toBe(true);
 });
 
 test('create, edit in Sage and Apprentice, reload offline, and round-trip a project ZIP', async ({ page, context }) => {
@@ -338,6 +491,7 @@ test('playtest clock runs configured scripts and accepts node-link input', async
   await expect(page.getByLabel('Chronological engine trace')).toContainText('Script echo-check');
   await expect(page.getByLabel('Chronological engine trace')).toContainText('Script keeper-check');
   await expect(page.getByLabel('Chronological engine trace')).toContainText('Script witness-check');
+  await page.getByText('Advanced: send PlayerInput JSON').click();
   await page.getByLabel('Step with PlayerInput JSON').fill('{"kind":"node-link","nodeId":"cellar"}');
   await page.getByRole('button', { name: 'Step session' }).click();
   await expect(page.getByText('Current test state: node')).toContainText('cellar');

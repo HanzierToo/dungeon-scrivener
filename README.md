@@ -11,18 +11,17 @@ Use Node.js 24.19.0 from [`.nvmrc`](.nvmrc), or another supported Node.js versio
 ```sh
 nvm use                         # if you use nvm
 npm ci
-npm run build:portable --workspace @dungeon-scrivener/player
 npm run dev:studio
 ```
 
-Open the local URL printed by Vite, normally `http://127.0.0.1:5173`. The portable-player build creates a generated artifact that Studio imports. Run it after a fresh install and after changing the player runtime. `npm run build:studio` also creates that artifact automatically.
+Open the local URL printed by Vite, normally `http://127.0.0.1:5173`. The dev command builds the player module that Studio imports before starting the server. Restart the dev command after changing the player runtime. `npm run build:studio` also creates that artifact automatically.
 
 ## Make a first game
 
 1. Select **Create project**, enter a title and a semantic game version such as `1.0.0`, and open the starter story. You can also **Import project ZIP** to resume an existing authoring project.
-   On your first new project in this browser, choose **Start tour** for a short guided look around the Studio, or **Not now** to go straight to work. **Take the tour** in the workspace can replay it later.
-2. Start in **Apprentice** to inspect the scene map and edit the selected scene in the inspector. Switch to **Sage** to open `world.json` and work directly with the starter scenes, choices, and navigation edges. Changes in either mode belong to one project.
-3. Choose **Playtest** to try inputs and inspect the isolated session, state, and engine trace. Choose **Play** to see the normal player interface. Fix blocking issues shown in **Project diagnostics** before exporting.
+   On your first new project in this browser, choose **Start tour** for a short guided look around the Studio, or **Not now** to go straight to work. The tour asks whether you prefer the visual Apprentice map or the file-based Sage editor. After the Studio tour, an optional **Game tutorial** teaches the steps of building a small game. Both can be replayed from the workspace header. Each mode also has a short **Tour this view** guide.
+2. Start in **Apprentice** to arrange scenes on the map and edit the selected scene in the inspector. Drag a scene to move it. Drag from one scene’s bottom dot to another scene’s top dot to create a navigation edge, then assign that edge to a choice or command in the inspector so players can use it. Map positions are saved in the project ZIP. Switch to **Sage** to open `world.json` and work directly with the starter scenes, choices, and navigation edges. Its Explorer can show folders or flat paths and sort by name or type. Right-click a path for Rename or Delete, use tabs to move between files, and press Tab in the editor to indent. Changes in either mode belong to one project.
+3. Choose **Playtest** to try scene choices and commands in an isolated session. Create a checkpoint to revisit a branch; open the inspection panels for state and engine traces or advanced inputs. Choose **Play** to see the terminal-styled reader interface. Fix blocking issues shown in **Project diagnostics** before exporting.
 4. Choose **Download project ZIP** to keep an editable copy outside browser storage. Studio also keeps a local recovery copy and reminds you about unsaved work, but the ZIP is the deliberate portable authoring save.
 5. Choose **Export game ZIP** to make a playable copy. Extract the ZIP and open its `index.html` directly in a supported browser. The optional README downloads beside the game ZIP.
 
@@ -36,7 +35,7 @@ For a small worked example, read [The Lantern Crossing](fixtures/linear-three-no
 | --- | --- | --- |
 | **Project ZIP** | Author | The editable project file tree, including files the editor does not interpret. Import it back into Studio. |
 | **Game ZIP** | Player | A portable game with `index.html`. Extract it before opening it. |
-| **Player-save ZIP** | Player | One `save.json` session document. Download and import it through a compatible game's controls. It does not replace the project ZIP. |
+| **Player-save ZIP** | Player | One `player-save.json` session document. Download and import it through a compatible game's controls. It does not replace the project ZIP. |
 
 The main project files are `project.json` for identity, version, and default locale; `world.json` for story and game behavior; `locales/*.json` for translated text; `scripts/*` for declared source; and `assets/sha256/*` for managed media. The project ZIP also retains unrelated files byte for byte. See the [archive and save contract](docs/contracts/archive-save-fingerprint.md) for the exact formats.
 

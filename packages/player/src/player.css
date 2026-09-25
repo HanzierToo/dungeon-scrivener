@@ -35,3 +35,35 @@
 .ds-player__visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 48rem) { .ds-player__layout { grid-template-columns: 1fr; } .ds-player__header { align-items: flex-start; } }
 @media (prefers-reduced-motion: reduce) { .ds-player *, .ds-player *::before, .ds-player *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+
+/* Portable terminal presentation shared by hosted Play and game exports. */
+.ds-player {
+  --ds-player-bg: #101b18; --ds-player-surface: #142520; --ds-player-text: #d9f0d7;
+  --ds-player-muted: #91aa98; --ds-player-accent: #e7b772;
+  position: relative; isolation: isolate; overflow: hidden; padding: clamp(1.25rem, 4vw, 3rem);
+  background: radial-gradient(ellipse at 50% 38%, #1a3027 0, #101b18 65%, #0a1211 100%);
+  color: var(--ds-player-text); font: 1rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-shadow: 0 0 8px rgb(155 245 173 / 12%);
+  box-shadow: inset 0 0 0 10px #25302a, inset 0 0 0 13px #425449, inset 0 0 85px rgb(0 0 0 / 70%);
+}
+.ds-player::before { position: absolute; z-index: 2; inset: 0; content: ''; pointer-events: none; background: repeating-linear-gradient(to bottom, transparent 0 3px, rgb(0 0 0 / 9%) 4px 5px); opacity: .52; }
+.ds-player__header { max-width: 82rem; margin: 0 auto; padding-bottom: 1.1rem; border-bottom: 1px solid #567663; }
+.ds-player__brand::before { display: block; margin-bottom: .35rem; color: var(--ds-player-accent); content: 'DUNGEON SCRIVENER / STORY TERMINAL'; font-size: .7rem; font-weight: 700; letter-spacing: .15em; }
+.ds-player__brand h1 { color: #e3f6d8; font-size: clamp(1.4rem, 2.6vw, 2.25rem); line-height: 1.2; text-shadow: 0 0 14px rgb(168 251 161 / 32%); }
+.ds-player__clock::before { content: 'TIME  '; color: var(--ds-player-accent); }
+.ds-player__layout { grid-template-columns: minmax(0, 1.9fr) minmax(14rem, .8fr); gap: 1.25rem; max-width: 82rem; }
+.ds-player__scene, .ds-player__dialogue, .ds-player__choices, .ds-player__inventory, .ds-player__settings { border: 1px solid #466b53; border-radius: .25rem; background: linear-gradient(155deg, rgb(20 44 33 / 95%), rgb(15 31 28 / 95%)); box-shadow: inset 0 0 20px rgb(0 0 0 / 22%), 0 7px 28px rgb(0 0 0 / 16%); }
+.ds-player__scene::before, .ds-player__choices::before, .ds-player__inventory::before { display: block; margin-bottom: 1rem; padding-bottom: .4rem; border-bottom: 1px solid #45634d; color: var(--ds-player-accent); font-size: .68rem; font-weight: 700; letter-spacing: .14em; }
+.ds-player__scene::before { content: '01 / CURRENT SCENE'; }
+.ds-player__choices::before { content: '02 / INPUT'; }
+.ds-player__inventory::before { content: 'STATUS / INVENTORY'; }
+.ds-player__scene h2, .ds-player__choices h3, .ds-player__inventory h2 { color: #e9f8df; text-shadow: 0 0 12px rgb(168 251 161 / 22%); }
+.ds-player__scene h2 { margin-bottom: 1.3rem; font-size: clamp(1.4rem, 2.2vw, 1.9rem); }
+.ds-player__content { max-width: 68ch; line-height: 1.9; }
+.ds-player button, .ds-player input, .ds-player select { border-color: #8ea08a; border-radius: .18rem; background: #14231e; }
+.ds-player button:hover { border-color: var(--ds-player-accent); background: #294232; color: #fff3d9; }
+.ds-player__actions button { text-align: left; }
+.ds-player__actions button::before { content: '> '; color: var(--ds-player-accent); }
+.ds-player__locale { max-width: 82rem; margin: 0 auto; text-align: right; font-size: .72rem; letter-spacing: .12em; }
+@media (max-width: 48rem) { .ds-player { box-shadow: inset 0 0 0 5px #25302a, inset 0 0 45px rgb(0 0 0 / 50%); } .ds-player__layout { grid-template-columns: 1fr; } .ds-player__header { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { .ds-player::before { opacity: .2; } }

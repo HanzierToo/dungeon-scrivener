@@ -1,4 +1,6 @@
 import { EditorView, basicSetup } from 'codemirror';
+import { indentWithTab } from '@codemirror/commands';
+import { keymap } from '@codemirror/view';
 import { json } from '@codemirror/lang-json';
 import { javascript } from '@codemirror/lang-javascript';
 import { markdown } from '@codemirror/lang-markdown';
@@ -62,6 +64,7 @@ export class SageWorkspace {
   private scriptDiagnostics = new Map<string, readonly Diagnostic[]>();
   private dirty = new Set<string>();
   private active: string | undefined;
+  private openPaths: string[] = [];
 
   constructor(snapshot: ProjectVfsSnapshot) {
     this.current = snapshot;
@@ -83,6 +86,15 @@ export class SageWorkspace {
   open(path: string): SageWorkspaceState {
     if (!readProjectFile(this.current, path) && !this.current.directories.has(path)) throw new Error(`No file or directory at ${path}.`);
     this.active = path;
+    if (!this.current.directories.has(path) && !this.openPaths.includes(path)) this.openPaths.push(path);
+    return this.getState();
+  }
+
+  getOpenPaths(): readonly string[] { return this.openPaths; }
+
+  closeTab(path: string): SageWorkspaceState {
+    this.openPaths = this.openPaths.filter(item => item !== path);
+    if (this.active === path) this.active = this.openPaths.at(-1);
     return this.getState();
   }
 
@@ -102,7 +114,8 @@ export class SageWorkspace {
     this.current = renameProjectPath(this.current, from, to);
     this.scriptDiagnostics.delete(from);
     this.scriptDiagnostics.delete(to);
-    if (this.active === from) this.active = to;
+    if (this.active === from || this.active?.startsWith(`${from}/`)) this.active = to + this.active.slice(from.length);
+    this.openPaths = this.openPaths.map(path => path === from || path.startsWith(`${from}/`) ? to + path.slice(from.length) : path);
     this.dirty.add(from);
     this.dirty.add(to);
     return this.afterEdit();
@@ -111,7 +124,9 @@ export class SageWorkspace {
   delete(path: string): SageWorkspaceState {
     this.current = deleteProjectPath(this.current, path);
     this.scriptDiagnostics.delete(path);
-    if (this.active === path) this.active = undefined;
+    if (this.active === path || this.active?.startsWith(`${path}/`)) this.active = undefined;
+    this.openPaths = this.openPaths.filter(item => item !== path && !item.startsWith(`${path}/`));
+    if (!this.active) this.active = this.openPaths.at(-1);
     this.dirty.add(path);
     return this.afterEdit();
   }
@@ -221,8 +236,12 @@ export interface SageModeProps {
 /** File-tree IDE view. File bytes remain in the VFS while tabs are switched. */
 export function SageMode({ workspace, onStateChange, showExport = true }: SageModeProps): React.ReactElement {
   const [state, setState] = useState(workspace.getState());
-  const [tabs, setTabs] = useState<string[]>(() => workspace.getState().activePath ? [workspace.getState().activePath!] : []);
+  const [tabs, setTabs] = useState<string[]>(() => [...workspace.getOpenPaths()]);
   const [pathInput, setPathInput] = useState('');
+  const [view, setView] = useState<'tree' | 'flat'>(() => localStorage.getItem('ds-sage-view') === 'flat' ? 'flat' : 'tree');
+  const [sort, setSort] = useState<'name' | 'type'>(() => localStorage.getItem('ds-sage-sort') === 'type' ? 'type' : 'name');
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['locales', 'scripts', 'assets', 'styles']));
+  const [context, setContext] = useState<{ path: string; x: number; y: number }>();
   const editorHost = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | undefined>(undefined);
   const currentFile = useMemo(() => state.activePath ? readProjectFile(state.snapshot, state.activePath) : undefined, [state]);
@@ -238,7 +257,7 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
     const value = decoder.decode(currentFile.bytes);
     const view = new EditorView({
       doc: value,
-      extensions: [basicSetup, ...editorExtensions(currentFile.path), EditorView.updateListener.of(update => {
+      extensions: [basicSetup, keymap.of([indentWithTab]), ...editorExtensions(currentFile.path), EditorView.updateListener.of(update => {
         if (update.docChanged) {
           const source = update.state.doc.toString();
           workspace.editText(currentFile.path, source);
@@ -257,65 +276,109 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
     onStateChange?.(next);
   };
 
-  const paths = [...state.snapshot.directories, ...state.snapshot.files.keys()].sort((a, b) => a.localeCompare(b));
+  useEffect(() => {
+    if (!context) return;
+    const dismiss = () => setContext(undefined);
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', dismiss);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', dismiss); };
+  }, [context]);
+
+  const files = [...state.snapshot.files.keys()];
+  const directories = new Set(state.snapshot.directories);
+  for (const path of files) {
+    const parts = path.split('/');
+    for (let index = 1; index < parts.length; index += 1) directories.add(parts.slice(0, index).join('/'));
+  }
+  const paths = [...directories, ...files];
+  const compare = (a: string, b: string) => {
+    if (sort === 'type') {
+      const aDirectory = directories.has(a);
+      const bDirectory = directories.has(b);
+      if (aDirectory !== bDirectory) return aDirectory ? -1 : 1;
+      const aExtension = a.split('.').at(-1) ?? '';
+      const bExtension = b.split('.').at(-1) ?? '';
+      if (!aDirectory && aExtension !== bExtension) return aExtension.localeCompare(bExtension);
+    }
+    return a.split('/').at(-1)!.localeCompare(b.split('/').at(-1)!);
+  };
   const open = (path: string) => {
+    if (directories.has(path)) { setExpanded(current => { const next = new Set(current); if (next.has(path)) next.delete(path); else next.add(path); return next; }); return; }
     update(workspace.open(path));
-    setTabs(existing => existing.includes(path) ? existing : [...existing, path]);
+    setTabs([...workspace.getOpenPaths()]);
+  };
+  const closeTab = (path: string) => {
+    update(workspace.closeTab(path));
+    setTabs([...workspace.getOpenPaths()]);
   };
   const create = (directory: boolean) => {
     if (!pathInput) return;
     try {
       const next = directory ? workspace.createDirectory(pathInput) : workspace.createFile(pathInput);
       update(next);
-      if (!directory) { setTabs(existing => [...existing, pathInput]); open(pathInput); }
+      if (!directory) open(pathInput);
+      else setExpanded(current => new Set(current).add(pathInput));
       setPathInput('');
     } catch (error) { window.alert(error instanceof Error ? error.message : 'Unable to create path.'); }
   };
   const rename = (path: string) => {
     const target = window.prompt('Rename path', path);
     if (target && target !== path) {
-      try { update(workspace.rename(path, target)); setTabs(existing => existing.map(tab => tab === path ? target : tab)); }
+      try {
+        const next = workspace.rename(path, target);
+        setTabs([...workspace.getOpenPaths()]);
+        update(next);
+      }
       catch (error) { window.alert(error instanceof Error ? error.message : 'Unable to rename path.'); }
     }
   };
   const remove = (path: string) => {
     if (!window.confirm(`Delete ${path}${state.snapshot.files.has(path) ? '?' : ' and its contents? '}`)) return;
-    update(workspace.delete(path));
-    setTabs(existing => existing.filter(tab => tab !== path));
+    const next = workspace.delete(path);
+    setTabs([...workspace.getOpenPaths()]);
+    update(next);
   };
 
-  return React.createElement('section', { className: 'sage-mode', 'aria-label': 'Sage Mode file editor' },
-    React.createElement('aside', { className: 'sage-file-tree', 'aria-label': 'Project files' },
-      React.createElement('h2', null, 'Project files'),
-      React.createElement('ul', null, ...paths.map(path => React.createElement('li', { key: path },
-        React.createElement('button', { type: 'button', onClick: () => open(path) }, path),
-        React.createElement('button', { type: 'button', onClick: () => rename(path), 'aria-label': `Rename ${path}` }, 'Rename'),
-        React.createElement('button', { type: 'button', onClick: () => remove(path), 'aria-label': `Delete ${path}` }, 'Delete')))),
-      React.createElement('label', null, 'New path', React.createElement('input', { value: pathInput, onChange: event => setPathInput(event.currentTarget.value) })),
-      React.createElement('button', { type: 'button', onClick: () => create(false) }, 'New file'),
-      React.createElement('button', { type: 'button', onClick: () => create(true) }, 'New folder'),
-      showExport ? React.createElement('button', { type: 'button', onClick: () => { void workspace.exportZip().then(bytes => {
+  const showContext = (path: string, x: number, y: number) => {
+    setContext({ path, x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 110) });
+  };
+  const renderEntry = (path: string, depth: number): React.ReactNode => {
+    const isDirectory = directories.has(path);
+    const children = paths.filter(candidate => candidate !== path && candidate.startsWith(path ? `${path}/` : '') && candidate.slice(path ? path.length + 1 : 0).indexOf('/') === -1).sort(compare);
+    return <li key={path}>
+      <div className={`sage-entry${state.activePath === path ? ' is-active' : ''}`} style={{ paddingLeft: `${.45 + depth * .85}rem` }} onContextMenu={event => { event.preventDefault(); showContext(path, event.clientX, event.clientY); }}>
+        <button type="button" className="sage-entry__name" aria-expanded={isDirectory ? expanded.has(path) : undefined} onClick={() => open(path)} onKeyDown={event => { if (event.key === 'F10' && event.shiftKey) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); showContext(path, rect.left, rect.bottom); } }} title={path}>
+          <span aria-hidden="true" className="sage-entry__icon">{isDirectory ? expanded.has(path) ? '▾' : '▸' : '◇'}</span>{view === 'flat' ? path : path.split('/').at(-1)}
+        </button>
+        <button type="button" className="sage-entry__menu" aria-label={`Actions for ${path}`} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); showContext(path, rect.right - 180, rect.bottom); }}>···</button>
+      </div>
+      {isDirectory && expanded.has(path) && view === 'tree' && <ul>{children.map(child => renderEntry(child, depth + 1))}</ul>}
+    </li>;
+  };
+  const visiblePaths = view === 'flat' ? paths.sort(compare) : paths.filter(path => !path.includes('/')).sort(compare);
+
+  return <section className="sage-mode" aria-label="Sage Mode file editor">
+    <aside className="sage-file-tree" aria-label="Project files">
+      <div className="sage-explorer-heading"><h2>Explorer</h2><span>{files.length} files</span></div>
+      <div className="sage-explorer-settings"><label>View<select aria-label="Explorer view" value={view} onChange={event => { const next = event.currentTarget.value as 'tree' | 'flat'; setView(next); localStorage.setItem('ds-sage-view', next); }}><option value="tree">Folders</option><option value="flat">Flat paths</option></select></label><label>Sort<select aria-label="Explorer sort" value={sort} onChange={event => { const next = event.currentTarget.value as 'name' | 'type'; setSort(next); localStorage.setItem('ds-sage-sort', next); }}><option value="name">Name</option><option value="type">Type</option></select></label></div>
+      <ul className="sage-explorer-list">{visiblePaths.map(path => renderEntry(path, 0))}</ul>
+      <div className="sage-explorer-create"><label>New path<input value={pathInput} onChange={event => setPathInput(event.currentTarget.value)} placeholder="folder/file.json" /></label><div><button type="button" onClick={() => create(false)}>New file</button><button type="button" onClick={() => create(true)}>New folder</button></div></div>
+      {showExport ? <button type="button" onClick={() => { void workspace.exportZip().then(bytes => {
         const zipBytes = new Uint8Array(bytes);
         const url = URL.createObjectURL(new Blob([zipBytes.buffer], { type: 'application/zip' }));
         const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'project.zip'; anchor.click(); URL.revokeObjectURL(url);
-      }); } }, 'Export project ZIP') : null),
-    React.createElement('main', { className: 'sage-editor-area' },
-      React.createElement('nav', { 'aria-label': 'Open files', role: 'tablist' }, ...tabs.map(path => React.createElement('button', {
-        key: path, type: 'button', role: 'tab', 'aria-selected': state.activePath === path, onClick: () => open(path)
-      }, path))),
-      currentFile ? textFile
-        ? React.createElement('div', { className: 'sage-code-editor', ref: editorHost, 'aria-label': `Editor for ${currentFile.path}` })
-        : React.createElement('section', { className: 'sage-binary-preview', 'aria-label': `Binary preview for ${currentFile.path}` },
-          React.createElement('p', null, `${currentFile.bytes.byteLength} bytes`),
-          React.createElement('pre', null, Array.from(currentFile.bytes.slice(0, 256), (byte: number) => byte.toString(16).padStart(2, '0')).join(' ')),
-          currentFile.bytes.byteLength > 256 ? React.createElement('p', null, 'Preview limited to the first 256 bytes.') : null)
-        : React.createElement('p', null, 'Choose a project file to edit.'),
-      React.createElement('section', { className: 'sage-diagnostics', 'aria-live': 'polite' },
-        React.createElement('h2', null, 'Diagnostics'),
-        state.diagnostics.length === 0 ? React.createElement('p', null, 'No diagnostics.') : React.createElement('ul', null,
-          ...state.diagnostics.map((diagnostic, index) => React.createElement('li', { key: `${diagnostic.code}:${diagnostic.path ?? ''}:${index}` },
-            `${diagnostic.severity.toUpperCase()} ${diagnostic.path ?? ''}: ${diagnostic.message}`)))))
-  );
+      }); }}>Export project ZIP</button> : null}
+      {context && <div className="sage-context-menu" role="menu" aria-label={`Actions for ${context.path}`} style={{ left: context.x, top: context.y }} onPointerDown={event => event.stopPropagation()}><button role="menuitem" onClick={() => { rename(context.path); setContext(undefined); }}>Rename</button><button role="menuitem" onClick={() => { remove(context.path); setContext(undefined); }}>Delete</button></div>}
+    </aside>
+    <main className="sage-editor-area">
+      <nav aria-label="Open files" role="tablist">{tabs.map(path => <div className="sage-tab" key={path}><button type="button" role="tab" aria-selected={state.activePath === path} onClick={() => open(path)}>{path.split('/').at(-1)}</button><button type="button" className="sage-tab__close" aria-label={`Close ${path}`} onClick={() => closeTab(path)}>×</button></div>)}</nav>
+      {currentFile ? textFile
+        ? <div className="sage-code-editor" ref={editorHost} aria-label={`Editor for ${currentFile.path}`} />
+        : <section className="sage-binary-preview" aria-label={`Binary preview for ${currentFile.path}`}><p>{currentFile.bytes.byteLength} bytes</p><pre>{Array.from(currentFile.bytes.slice(0, 256), (byte: number) => byte.toString(16).padStart(2, '0')).join(' ')}</pre>{currentFile.bytes.byteLength > 256 && <p>Preview limited to the first 256 bytes.</p>}</section>
+        : <div className="sage-empty-editor"><span aria-hidden="true">✦</span><p>Open a file from Explorer to begin editing.</p></div>}
+      <section className="sage-diagnostics" aria-live="polite"><h2>Diagnostics</h2>{state.diagnostics.length === 0 ? <p>No diagnostics.</p> : <ul>{state.diagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}:${diagnostic.path ?? ''}:${index}`}>{diagnostic.severity.toUpperCase()} {diagnostic.path ?? ''}: {diagnostic.message}</li>)}</ul>}</section>
+    </main>
+  </section>;
 }
 
 export { isText as isSageTextFile };

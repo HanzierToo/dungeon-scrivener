@@ -31,6 +31,7 @@ export interface PlaytestDebuggerProps {
   /** Supply the app's configured engine dispatch when the world requires script runtime capabilities. */
   readonly stepSession?: DebugPlaytestStep;
   readonly observeClock?: DebugPlaytestClock;
+  readonly localeStrings?: Readonly<Record<string, string>>;
 }
 
 function copySnapshot(snapshot: SessionSnapshot): SessionSnapshot {
@@ -178,6 +179,7 @@ export function PlaytestDebugger({
   completeTraceHistory = false,
   stepSession,
   observeClock,
+  localeStrings = {},
 }: PlaytestDebuggerProps) {
   const initial = useMemo(() => copySnapshot(initialSnapshot), [initialSnapshot]);
   const [snapshot, setSnapshot] = useState<SessionSnapshot>(() => copySnapshot(initial));
@@ -190,6 +192,7 @@ export function PlaytestDebugger({
   const [draftFieldId, setDraftFieldId] = useState('');
   const [editMessage, setEditMessage] = useState('');
   const [stepMessage, setStepMessage] = useState('');
+  const [command, setCommand] = useState('');
   const fields = useMemo(() => buildEditableFields(world), [world]);
   const selectedField = fields.find((field) => field.id === selectedFieldId) ?? fields[0];
   const value = selectedField ? currentValue(snapshot, selectedField.reference) : undefined;
@@ -280,14 +283,28 @@ export function PlaytestDebugger({
   const checkpoint = checkpoints.find((candidate) => String(candidate.id) === selectedCheckpointId);
   const valueDraft = selectedField && value !== undefined ? scalarText(value) : '';
   const currentDraft = selectedField?.id === draftFieldId ? draft : valueDraft;
+  const currentNode = world.nodes.find(node => node.id === snapshot.currentNodeId);
+  const title = currentNode?.title.kind === 'literal' ? currentNode.title.text : currentNode?.title.kind === 'locale-key' ? localeStrings[currentNode.title.key] ?? currentNode.title.key : snapshot.currentNodeId;
+  const sceneText = currentNode?.content.kind === 'literal' ? currentNode.content.text : currentNode?.content.kind === 'locale-key' ? localeStrings[currentNode.content.key] ?? currentNode.content.key : '';
+  const choices = currentNode?.actions?.choices ?? world.actionDefaults?.choices ?? [];
+  const commands = currentNode?.actions?.commands ?? world.actionDefaults?.commands ?? [];
+  const labelFor = (label: typeof choices[number]['label']) => label.kind === 'literal' ? label.text : localeStrings[label.key] ?? label.key;
 
   return (
-    <section aria-label="Sandboxed playtest debugger" style={{ display: 'grid', gap: 12 }}>
+    <section aria-label="Sandboxed playtest debugger" className="playtest-workspace">
       <header>
         <h2>Sandboxed playtest</h2>
-        <p>This debugger owns an isolated copy of the session snapshot. Steps, restores, restarts, and debug edits do not update authored project files or player saves.</p>
+        <p>Try the game, rewind a branch, and inspect what happened. This session cannot change your project files or player saves.</p>
       </header>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <section data-tour="playtest-choices" className="playtest-stage" aria-label="Current test scene">
+        <div className="playtest-stage__heading"><div><span className="eyebrow">CURRENT SCENE</span><h3>{title}</h3><p><code>{snapshot.currentNodeId}</code> · Game time {Math.floor(snapshot.gameTimeMilliseconds / 1000)}s</p></div><span className="playtest-stage__badge">Isolated run</span></div>
+        {sceneText && <p className="playtest-stage__story">{sceneText}</p>}
+        <h4>What would you like to try?</h4>
+        {choices.length ? <div className="playtest-stage__choices">{choices.map(choice => <button type="button" key={choice.id} onClick={() => step({ kind: 'choice', actionId: choice.id })}>{labelFor(choice.label)}</button>)}</div> : <p>No choices are defined for this scene.</p>}
+        {commands.length > 0 && <form className="playtest-command" onSubmit={event => { event.preventDefault(); if (command.trim()) { step({ kind: 'command-text', rawText: command }); setCommand(''); } }}><label>Or type a command<input value={command} onChange={event => setCommand(event.currentTarget.value)} placeholder={commands[0]?.patterns[0] ?? 'Enter command'} /></label><button type="submit" disabled={!command.trim()}>Run command</button></form>}
+        {stepMessage && <p role="alert">{stepMessage}</p>}
+      </section>
+      <section data-tour="playtest-checkpoints" className="playtest-checkpoints" aria-label="Checkpoints"><div><h3>Try another path</h3><p>Save the current state, then return to it after exploring a branch.</p></div><div className="playtest-checkpoints__controls">
         <button type="button" onClick={makeCheckpoint}>Create checkpoint</button>
         <label>
           Checkpoint
@@ -298,10 +315,10 @@ export function PlaytestDebugger({
         </label>
         <button type="button" onClick={restoreCheckpoint} disabled={!checkpoint}>Restore checkpoint</button>
         <button type="button" onClick={restart}>Restart test session</button>
-      </div>
-      <StepInput onStep={step} />
-      {stepMessage && <p role="alert">{stepMessage}</p>}
-      <fieldset style={{ border: '2px solid #a44', padding: 12 }}>
+      </div></section>
+      <details className="playtest-advanced"><summary>Advanced: send PlayerInput JSON</summary><StepInput onStep={step} /></details>
+      <div data-tour="playtest-inspector" className="playtest-inspector"><h3>Inspect this run</h3><p>Review state and engine traces when a choice behaves unexpectedly.</p>
+      <details className="playtest-advanced"><summary>Debug state editing</summary><fieldset style={{ border: '2px solid #a44', padding: 12 }}>
         <legend><strong>DEBUG ONLY · Test session state editing</strong></legend>
         <p>Changes go through the engine’s validated <code>set-state</code> effect and remain in this isolated test session.</p>
         {selectedField && value !== undefined ? (
@@ -324,7 +341,7 @@ export function PlaytestDebugger({
           </form>
         ) : <p>No declared state fields are available to edit.</p>}
         {editMessage && <p role="status">{editMessage}</p>}
-      </fieldset>
+      </fieldset></details>
       <p>Current test state: node <code>{snapshot.currentNodeId}</code>, game time {snapshot.gameTimeMilliseconds} ms.</p>
       <details>
         <summary>Inspect complete test-session snapshot</summary>
@@ -336,6 +353,7 @@ export function PlaytestDebugger({
         transitions={transitions}
         completeTraceHistory={completeTraceHistory}
       />
+      </div>
     </section>
   );
 }

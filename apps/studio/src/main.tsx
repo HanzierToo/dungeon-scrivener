@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ApprenticeForms, ApprenticeGraph, ApprenticeScripts } from '@dungeon-scrivener/apprentice';
+import { ApprenticeForms, ApprenticeGraph, ApprenticeScripts, type GraphPositions } from '@dungeon-scrivener/apprentice';
 import { PlaytestDebugger } from '@dungeon-scrivener/debugger';
 import { collectDiagnostics, getAcknowledgementStatus } from '@dungeon-scrivener/diagnostics';
 import { createGameEngine } from '@dungeon-scrivener/engine';
@@ -14,7 +14,7 @@ import { EnginePlayer, isOfflineSafeTheme, PORTABLE_PLAYER_ENGINE_VERSION } from
 import { downloadPlayerSave, getSaveSlotChoices, importHostedSaveFile } from '@dungeon-scrivener/player-save';
 import { getPortablePlayerArtifact } from '@dungeon-scrivener/player/portable-artifact';
 import { compileWorldScripts, scriptExecutor } from '@dungeon-scrivener/scripting';
-import { shouldOfferStudioTour, StudioTour, type TourPhase } from './StudioTour.js';
+import { shouldOfferModeTour, shouldOfferStudioTour, StudioTour, type TourKind, type TourPhase } from './StudioTour.js';
 import linearManifest from '../../../fixtures/linear-three-nodes/project.json';
 import linearWorld from '../../../fixtures/linear-three-nodes/world.json';
 import linearLocale from '../../../fixtures/linear-three-nodes/locales/en-GB.json';
@@ -24,6 +24,7 @@ import './studio.css';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
+const GRAPH_LAYOUT_PATH = 'studio/graph-layout.json';
 type Mode = 'home' | 'sage' | 'apprentice' | 'playtest' | 'play';
 type PreparedProject = { snapshot: ProjectVfsSnapshot; manifest: ProjectManifest; world: WorldDocument; locales: LocaleDocument[]; scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog>; resolvedMedia: import('@dungeon-scrivener/model').ResolvedMediaAsset[]; themeCss: string };
 type PlayConfig = { scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog>; compatibility: SaveCompatibilityTarget; themeCss: string };
@@ -42,6 +43,25 @@ function parseFile(snapshot: ProjectVfsSnapshot, path: string): unknown {
   const file = readProjectFile(snapshot, path);
   if (!file) return undefined;
   try { return JSON.parse(decoder.decode(file.bytes)); } catch { return undefined; }
+}
+
+function readGraphPositions(snapshot: ProjectVfsSnapshot): GraphPositions {
+  const layout = parseFile(snapshot, GRAPH_LAYOUT_PATH);
+  if (!layout || typeof layout !== 'object' || !('schemaVersion' in layout) || layout.schemaVersion !== 1 || !('positions' in layout) || !layout.positions || typeof layout.positions !== 'object') return {};
+  return Object.fromEntries(Object.entries(layout.positions).filter((entry): entry is [string, { x: number; y: number }] => {
+    const value = entry[1];
+    return !!value && typeof value === 'object' && 'x' in value && 'y' in value
+      && typeof value.x === 'number' && Number.isFinite(value.x) && Math.abs(value.x) <= 100000
+      && typeof value.y === 'number' && Number.isFinite(value.y) && Math.abs(value.y) <= 100000;
+  }));
+}
+
+function diagnosticMessage(item: Diagnostic, world: WorldDocument | undefined, locale: LocaleDocument | undefined): string {
+  if (item.code !== 'DS-MOD-031' || !item.entityId || !world) return item.message;
+  const node = world.nodes.find(candidate => candidate.id === item.entityId);
+  if (!node) return item.message;
+  const title = node.title.kind === 'literal' ? node.title.text : locale?.strings[node.title.key] ?? node.title.key;
+  return `“${title}” is unreachable from the entry scene. Drag from a reachable scene’s bottom dot to this scene’s top dot, or use “Link selected scene to” in the map toolbar.`;
 }
 
 function createSageWorkspace(snapshot: ProjectVfsSnapshot, preferredPath?: string): SageWorkspace {
@@ -111,6 +131,7 @@ function App(): React.ReactElement {
   const [distributionAttribution, setDistributionAttribution] = useState('');
   const [recoveryAvailable, setRecoveryAvailable] = useState(false);
   const [tourPhase, setTourPhase] = useState<TourPhase>(null);
+  const [tourKind, setTourKind] = useState<TourKind>('studio');
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [inspectorTab, setInspectorTab] = useState<'scene' | 'world' | 'scripts'>('scene');
   const [recoveryProjectId, setRecoveryProjectId] = useState<string | null>(null);
@@ -126,6 +147,7 @@ function App(): React.ReactElement {
   const snapshotRef = useRef<ProjectVfsSnapshot | null>(null);
   const manifest = useMemo(() => snapshot ? parseFile(snapshot, 'project.json') as ProjectManifest | undefined : undefined, [snapshot, revision]);
   const world = useMemo(() => snapshot ? parseFile(snapshot, 'world.json') as WorldDocument | undefined : undefined, [snapshot, revision]);
+  const graphPositions = useMemo(() => snapshot ? readGraphPositions(snapshot) : {}, [snapshot]);
   const locales = useMemo(() => snapshot ? [...snapshot.files.keys()]
     .filter(path => /^locales\/[^/]+\.json$/u.test(path))
     .map(path => parseFile(snapshot, path))
@@ -144,6 +166,16 @@ function App(): React.ReactElement {
     seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! },
     unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! },
   }, playConfig.scripts) : undefined, [playConfig]);
+
+  useEffect(() => {
+    if (tourPhase === 'invite' && tourKind !== 'studio' && tourKind !== 'tutorial' && tourKind !== mode) {
+      setTourPhase(null);
+      return;
+    }
+    if (!snapshot || mode === 'home' || tourPhase || !shouldOfferModeTour(mode)) return;
+    const timer = window.setTimeout(() => { setTourKind(mode); setTourPhase('invite'); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [snapshot, mode, tourPhase, tourKind]);
 
   useEffect(() => {
     if (!snapshot || !world) return;
@@ -180,6 +212,11 @@ function App(): React.ReactElement {
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
+    if (import.meta.env.DEV) {
+      void navigator.serviceWorker.getRegistration().then(registration => registration?.unregister());
+      void caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('dungeon-scrivener-studio-')).map(key => caches.delete(key))));
+      return;
+    }
     void navigator.serviceWorker.register('/sw.js').then(async registration => {
       await navigator.serviceWorker.ready;
       const worker = registration.active;
@@ -403,6 +440,21 @@ function App(): React.ReactElement {
     setRevision(value => value + 1);
   }
 
+  function updateGraphPositions(positions: GraphPositions): void {
+    const current = snapshotRef.current;
+    if (!current) return;
+    const bytes = encoder.encode(JSON.stringify({ schemaVersion: 1, positions }, null, 2));
+    const files = [...current.files.values()].filter(file => file.path !== GRAPH_LAYOUT_PATH);
+    files.push({ path: GRAPH_LAYOUT_PATH, bytes, role: 'arbitrary' });
+    const updated = createSnapshot(files, current.directories);
+    snapshotRef.current = updated;
+    setSnapshot(updated);
+    workspaceRef.current = createSageWorkspace(updated);
+    setUnsavedSince(Date.now());
+    setReminderVisible(false);
+    setRevision(value => value + 1);
+  }
+
   function updateLocales(nextLocales: readonly LocaleDocument[]): void {
     const current = snapshotRef.current;
     if (!current) return;
@@ -593,7 +645,7 @@ function App(): React.ReactElement {
         }
         setNewProjectError('');
         openProject(snapshotFromData(manifestResult.value, linearWorld, { 'locales/en-GB.json': linearLocale }), 'Starter project created.', true, 'apprentice');
-        if (shouldOfferStudioTour()) setTourPhase('invite');
+        if (shouldOfferStudioTour()) { setTourKind('studio'); setTourPhase('invite'); }
       }}>Create project</button>
         </div>
         <div className="home-import"><div><strong>Already have a project?</strong><span>Bring your editable ZIP back into the studio.</span></div><label className={`button${importing ? ' is-disabled' : ''}`} aria-busy={importing}>Import project ZIP<input type="file" accept=".zip,application/zip" disabled={importing} onChange={event => void importZip(event.currentTarget.files?.[0])} /></label></div>
@@ -613,12 +665,12 @@ function App(): React.ReactElement {
     <a className="skip-link" href="#studio-workspace">Skip to project workspace</a>
     <header className="studio-header">
       <div className="studio-header__identity"><div className="brand"><span className="brand-mark" aria-hidden="true">✦</span><span>DungeonScrivener</span></div><button className="studio-projects" onClick={() => setMode('home')}>Projects</button><span className="studio-header__divider" aria-hidden="true">/</span><div data-tour="project-heading" className="studio-project-name"><strong>{manifest?.title ?? manifest?.projectId ?? 'Untitled project'}</strong><span>v{manifest?.gameVersion ?? '1.0.0'}</span></div></div>
-      <button className="tour-replay" onClick={() => setTourPhase('tour')}>Take the tour</button>
+      <div className="studio-header__learning"><button className="tour-replay" onClick={() => { setTourKind('studio'); setTourPhase('tour'); }}>Take the tour</button><button className="tour-replay" onClick={() => { setTourKind('tutorial'); setTourPhase('invite'); }}>Game tutorial</button></div>
     </header>
     <div className="studio-commandbar">
-      <nav className="mode-nav" aria-label="Editing modes">
-        <button aria-pressed={mode === 'sage'} onClick={() => { const current = snapshotRef.current ?? snapshot; if (current) { workspaceRef.current = createSageWorkspace(current); setStatus('Sage Mode is using the current project snapshot.'); } setMode('sage'); }}>Sage</button>
-        <button aria-pressed={mode === 'apprentice'} onClick={() => setMode('apprentice')}>Apprentice</button>
+      <nav data-tour="mode-switch" className="mode-nav" aria-label="Editing modes">
+        <button aria-pressed={mode === 'sage'} onClick={() => { const current = snapshotRef.current ?? snapshot; if (current) { if (!workspaceRef.current || workspaceRef.current.getState().snapshot !== current) workspaceRef.current = createSageWorkspace(current); setStatus('Sage Mode is using the current project snapshot.'); } setTourPhase(null); setMode('sage'); }}>Sage</button>
+        <button aria-pressed={mode === 'apprentice'} onClick={() => { setTourPhase(null); setMode('apprentice'); }}>Apprentice</button>
       </nav>
       <nav className="studio-actions" aria-label="Studio actions">
         <button data-tour="playtest-action" onClick={() => requestAction('play', () => { void startPlaytest(); })}>Playtest</button>
@@ -627,7 +679,7 @@ function App(): React.ReactElement {
         <button data-tour="game-export" className="button-primary" onClick={() => requestAction('export', () => setExportDialogOpen(true))}>Export game ZIP</button>
       </nav>
     </div>
-    <section className="workspace-heading" aria-label="Current workspace"><div><p className="eyebrow">{mode === 'sage' ? 'THE FILE DESK' : mode === 'apprentice' ? 'THE STORY MAP' : mode === 'playtest' ? 'THE TEST CHAMBER' : 'THE READER VIEW'}</p><h1>{mode === 'sage' ? 'Sage' : mode === 'apprentice' ? 'Apprentice' : mode === 'playtest' ? 'Playtest' : 'Play'}</h1><p>{mode === 'sage' ? 'Edit the project at its source.' : mode === 'apprentice' ? 'Shape scenes and their connections.' : mode === 'playtest' ? 'Try a run and inspect what happened.' : 'Experience the story as a reader.'}</p></div><span className="workspace-heading__project">CURRENT PROJECT · {manifest?.title ?? manifest?.projectId ?? 'Untitled project'}</span></section>
+    <section className="workspace-heading" aria-label="Current workspace"><div><p className="eyebrow">{mode === 'sage' ? 'THE FILE DESK' : mode === 'apprentice' ? 'THE STORY MAP' : mode === 'playtest' ? 'THE TEST CHAMBER' : 'THE READER VIEW'}</p><div className="workspace-heading__title"><h1>{mode === 'sage' ? 'Sage' : mode === 'apprentice' ? 'Apprentice' : mode === 'playtest' ? 'Playtest' : 'Play'}</h1><p>{mode === 'sage' ? 'Edit the project at its source.' : mode === 'apprentice' ? 'Shape scenes and their connections.' : mode === 'playtest' ? 'Try a run and inspect what happened.' : 'Experience the story as a reader.'}</p></div></div><div className="workspace-heading__aside"><span className="workspace-heading__project">CURRENT PROJECT · {manifest?.title ?? manifest?.projectId ?? 'Untitled project'}</span><button type="button" onClick={() => { setTourKind(mode); setTourPhase('tour'); }}>Tour this view</button></div></section>
     {status && <p className="status" role="status">{status}</p>}
     {playActivity && mode === 'play' && <p className="status" data-testid="hosted-play-activity">{playActivity}</p>}
     {operationError && <p className="status" role="alert">{operationError}</p>}
@@ -647,7 +699,7 @@ function App(): React.ReactElement {
       }
     }} />}
     {mode === 'apprentice' && world && <div className="apprentice-workbench">
-      <div className="apprentice-map"><ApprenticeGraph world={world} {...(selectedNodeId ? { selectedNodeId } : {})}
+      <div className="apprentice-map"><ApprenticeGraph world={world} positions={graphPositions} onPositionsChange={updateGraphPositions} {...(selectedNodeId ? { selectedNodeId } : {})}
         nodeLabels={Object.fromEntries(world.nodes.map(node => [node.id, node.title.kind === 'literal' ? node.title.text : locales.find(locale => locale.locale === manifest?.defaultLocale)?.strings[node.title.key] ?? node.title.key]))}
         onSelectNode={nodeId => { setSelectedNodeId(nodeId); setInspectorTab('scene'); }} onWorldChange={updateWorld} /></div>
       <aside className="apprentice-inspector" aria-label="Story inspector">
@@ -670,6 +722,7 @@ function App(): React.ReactElement {
       </aside>
     </div>}
     {mode === 'playtest' && world && playSnapshot && activeEngine && <PlaytestDebugger world={world} initialSnapshot={playSnapshot}
+      localeStrings={locales.find(locale => locale.locale === manifest?.defaultLocale)?.strings ?? {}}
       stepSession={(current, input) => activeEngine.dispatchPlayerInput(world, current, input)}
       observeClock={(current, input) => activeEngine.observeClock(world, current, input)} />}
     {mode === 'play' && manifest && world && playSnapshot && playConfig && activeEngine && <EnginePlayer
@@ -683,7 +736,7 @@ function App(): React.ReactElement {
     />}
     {validation && report && <aside className="diagnostics" id="project-diagnostics" tabIndex={-1} aria-label="Project diagnostics" aria-live="polite">
       <div className="diagnostics__heading"><strong>Project diagnostics</strong><span className={report.diagnostics.length ? 'diagnostics__count has-issues' : 'diagnostics__count'}>{report.diagnostics.length ? `${report.diagnostics.length} to review` : 'All clear'}</span></div>
-      {report.diagnostics.length ? <ul>{report.diagnostics.map((item, index) => <li key={`${item.code}:${index}`}>{item.severity}: {item.code}: {item.message}</li>)}</ul> : <p>No diagnostics.</p>}
+      {report.diagnostics.length ? <ul>{report.diagnostics.map((item, index) => <li key={`${item.code}:${index}`}>{item.severity}: {item.code}: {diagnosticMessage(item, world, locales.find(locale => locale.locale === manifest?.defaultLocale))}</li>)}</ul> : <p>No diagnostics.</p>}
     </aside>}
     <button className="clear-recovery" onClick={async () => {
       if (!snapshot) return;
@@ -715,7 +768,13 @@ function App(): React.ReactElement {
       <h2 id="error-title">Action could not continue</h2><p>{operationError}</p>
       <button autoFocus onClick={() => setErrorDialogOpen(false)}>Close</button>
     </dialog>
-    <StudioTour phase={tourPhase} mode={mode} onModeChange={setMode} onClose={() => setTourPhase(null)} onStart={() => setTourPhase('tour')} />
+    <StudioTour phase={tourPhase} kind={tourKind} mode={mode} onModeChange={setMode} onClose={(outcome, kind) => {
+      if (kind === 'studio' && outcome === 'finished') {
+        setMode(localStorage.getItem('dungeon-scrivener-preferred-mode') === 'sage' ? 'sage' : 'apprentice');
+        if (localStorage.getItem('dungeon-scrivener-tutorial-tour-v1') === null) { setTourKind('tutorial'); setTourPhase('invite'); return; }
+      }
+      setTourPhase(null);
+    }} onStart={() => setTourPhase('tour')} />
   </div>;
 }
 

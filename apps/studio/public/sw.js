@@ -1,5 +1,6 @@
-const CACHE_NAME = 'dungeon-scrivener-studio-v2';
+const CACHE_NAME = 'dungeon-scrivener-studio-v3';
 const APP_SHELL = ['/', '/manifest.webmanifest'];
+const VITE_DEV_PATH = /^\/(?:@vite\/|@fs\/|src\/|node_modules\/)/u;
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
 });
@@ -14,14 +15,18 @@ self.addEventListener('message', event => {
 });
 self.addEventListener('fetch', event => {
   const request = event.request;
-  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin || VITE_DEV_PATH.test(url.pathname)) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
     const cached = await cache.match(request, { ignoreVary: true });
     if (cached) return cached;
     try {
       const response = await fetch(request);
-      if (response.ok && ['document', 'script', 'style', 'font'].includes(request.destination)) {
+      const contentType = response.headers.get('content-type') ?? '';
+      const validScript = request.destination !== 'script' || /(?:java|ecma)script|wasm/iu.test(contentType);
+      const validStyle = request.destination !== 'style' || /text\/css/iu.test(contentType);
+      if (response.ok && validScript && validStyle && ['document', 'script', 'style', 'font'].includes(request.destination)) {
         void cache.put(request, response.clone());
       }
       return response;

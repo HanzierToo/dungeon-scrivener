@@ -47,7 +47,7 @@ export interface ApprenticeFormsProps {
 
 type ContentSettings = Pick<ApprenticeFormsProps, 'project' | 'locales' | 'defaultLocale' | 'assets' | 'mediaAssets' | 'onLocalesChange' | 'onImportAsset'>;
 
-const uid = () => crypto.randomUUID();
+const uid = () => `id-${crypto.randomUUID().replaceAll('-', '')}`;
 const fieldStyle = { display: 'grid', gap: 4, margin: '8px 0' } as const;
 const inputStyle = { maxWidth: 480, width: '100%' } as const;
 
@@ -265,7 +265,7 @@ function NodeEditor({ world, node, onChange, contentSettings }: { world: WorldDo
     <fieldset style={fieldStyle}><legend>Node state overrides</legend>{world.stateDefinitions.filter((field) => field.scopeKind === 'node').map((field) => <ScalarField key={field.key} label={`${field.key} (default ${String(field.defaultValue)})`} value={node.state?.[field.key] ?? field.defaultValue} valueType={field.valueType} onChange={(value) => onChange({ ...node, state: { ...node.state, [field.key]: value } })} />)}</fieldset>
     <p>Inherited choices: {inheritedActions.choices.length ? inheritedActions.choices.map((choice) => sourceLabel(choice.label)).join(', ') : 'none'}. {node.actions?.choices === undefined ? 'Using inherited choices.' : `Local choices replace them: ${localChoices.length ? localChoices.map((choice) => sourceLabel(choice.label)).join(', ') : 'none (disabled)'}.`}</p>
     <p>Inherited commands: {inheritedActions.commands.length ? inheritedActions.commands.map((command) => command.patterns[0]).join(', ') : 'none'}. {node.actions?.commands === undefined ? 'Using inherited commands.' : `Local commands replace them: ${localCommands.length ? localCommands.map((command) => command.patterns[0]).join(', ') : 'none (disabled)'}.`}</p>
-    <fieldset style={fieldStyle}><legend>Rules on this node</legend><p>Inherited rules: {inheritedRules.map((rule) => `${rule.id} (priority ${rule.priority})`).join(', ') || 'none'}</p>{world.rules.map((rule) => <label key={rule.id} style={{ display: 'block' }}><input type="checkbox" checked={(node.ruleIds ?? []).includes(rule.id)} onChange={(event) => onChange({ ...node, ruleIds: event.target.checked ? [...(node.ruleIds ?? []), rule.id] : (node.ruleIds ?? []).filter((id) => id !== rule.id) })} /> {rule.id} (priority {rule.priority})</label>)}</fieldset>
+    <fieldset style={fieldStyle}><legend>Rules on this node</legend><p>Inherited rules: {inheritedRules.map((rule) => `${rule.id} (priority ${rule.priority})`).join(', ') || 'none'}</p>{world.rules.map((rule) => <label key={rule.id}><input type="checkbox" checked={(node.ruleIds ?? []).includes(rule.id)} onChange={(event) => onChange({ ...node, ruleIds: event.target.checked ? [...(node.ruleIds ?? []), rule.id] : (node.ruleIds ?? []).filter((id) => id !== rule.id) })} /> {rule.id} (priority {rule.priority})</label>)}</fieldset>
     <ActionEditors actions={{ choices: localChoices, commands: localCommands }} world={world} onChange={(actions) => {
       const nextActions = { ...node.actions };
       if (actions.choices !== localChoices) nextActions.choices = actions.choices;

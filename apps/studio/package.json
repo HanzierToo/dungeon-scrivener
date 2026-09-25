@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build:portable --workspace @dungeon-scrivener/player",
     "dev": "vite --host 127.0.0.1",
     "prebuild": "npm run build:portable --workspace @dungeon-scrivener/player",
     "build": "tsc --noEmit && vite build",
