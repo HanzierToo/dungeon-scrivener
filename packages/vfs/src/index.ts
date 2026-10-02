@@ -208,6 +208,24 @@ function snapshotInputs(snapshot: ProjectVfsSnapshot): { files: ProjectFile[]; d
   };
 }
 
+/** Replace an existing file while retaining unchanged file bytes and snapshot entries. */
+export function replaceProjectFile(snapshot: ProjectVfsSnapshot, path: VfsPath, bytes: Uint8Array): ProjectVfsSnapshot {
+  const existing = snapshot.files.get(path);
+  if (!existing) throw new VfsError('DS-VFS-NOT-FOUND', `No file at ${path}.`, path);
+  if (!(bytes instanceof Uint8Array)) throw new VfsError('DS-VFS-OPERATION', 'File contents must be Uint8Array bytes.', path);
+  if (bytes.byteLength > PROJECT_VFS_LIMITS.maxFileBytes ||
+    (existing.role === 'manifest' || existing.role === 'world' || existing.role === 'locale') && bytes.byteLength > PROJECT_VFS_LIMITS.maxStructuredJsonBytes) {
+    throw new VfsError('DS-VFS-LIMIT', 'File exceeds its project byte limit.', path);
+  }
+  let totalBytes = bytes.byteLength;
+  for (const file of snapshot.files.values()) if (file.path !== path) totalBytes += file.bytes.byteLength;
+  if (totalBytes > PROJECT_VFS_LIMITS.maxTotalBytes) throw new VfsError('DS-VFS-LIMIT', 'Project files exceed the 256 MiB total limit.', path);
+  const replacement = cloneFile({ ...existing, bytes });
+  const files = new Map(snapshot.files);
+  files.set(path, replacement);
+  return Object.freeze({ ...snapshot, projectId: path === 'project.json' ? projectIdFromManifest(replacement) ?? snapshot.projectId : snapshot.projectId, files });
+}
+
 export function readProjectFile(snapshot: ProjectVfsSnapshot, path: VfsPath): ProjectFile | undefined {
   const key = pathComparisonKey(path);
   for (const file of snapshot.files.values()) {

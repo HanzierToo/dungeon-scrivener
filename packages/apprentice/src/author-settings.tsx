@@ -1,5 +1,6 @@
 import type { ProjectVfsSnapshot, TypingSoundFallback, TypingSoundMapping, TypingSoundTarget, WorldDocument } from '@dungeon-scrivener/model';
 import type { RegisteredAsset } from '../../media/src/index.js';
+import { CollectionBrowser } from './CollectionBrowser.js';
 
 export interface ApprenticeAuthorSettingsProps {
   readonly world: WorldDocument;
@@ -37,7 +38,12 @@ export function ApprenticeAuthorSettings({ world, project, assets = [], onWorldC
     </fieldset>
     <fieldset>
       <legend>Typing sound mappings</legend>
-      {sounds.mappings.map((mapping, index) => <div key={index} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', margin: '8px 0' }}>
+      <CollectionBrowser name="Sound mappings" items={sounds.mappings} title={mapping => mapping.target.kind === 'group' ? mapping.target.group : mapping.target.code} summary={mapping => `${Math.round(mapping.volume * 100)}% volume`}
+        addLabel="Add key-group mapping" addDisabled={!soundAssets.length || !nextGroup} onAdd={() => {
+          const asset = soundAssets[0];
+          if (!asset || !nextGroup) return;
+          updateSounds([...sounds.mappings, { target: { kind: 'group', group: nextGroup }, assetHash: soundHash(asset.assetId), volume: 1 }], sounds.fallback);
+        }} renderEditor={(mapping, index) => <div style={{ display: 'grid', gap: 8 }}>
         <label>Target <select value={mapping.target.kind === 'group' ? `group:${mapping.target.group}` : 'key'} onChange={(event) => {
           const [kind, value] = event.target.value.split(':');
           const target: TypingSoundTarget = kind === 'group' ? { kind: 'group', group: (value ?? 'letters') as typeof groups[number] } : { kind: 'key', code: mapping.target.kind === 'key' ? mapping.target.code : 'KeyA' };
@@ -47,12 +53,7 @@ export function ApprenticeAuthorSettings({ world, project, assets = [], onWorldC
         <label>WAV asset <select value={`sha256:${mapping.assetHash}`} onChange={(event) => updateMapping(index, { ...mapping, assetHash: soundHash(event.target.value) })}><option value="">Choose WAV</option>{!soundAssets.some((asset) => soundHash(asset.assetId) === mapping.assetHash) && <option value={`sha256:${mapping.assetHash}`}>{mapping.assetHash} · unavailable</option>}{soundAssets.map((asset) => <option key={asset.assetId} value={asset.assetId}>{asset.originalFilenames.join(', ')} · {asset.assetId}</option>)}</select></label>
         <label>Volume <input type="number" min="0" max="1" step="0.01" value={mapping.volume} onChange={(event) => updateMapping(index, { ...mapping, volume: Number(event.target.value) })} /></label>
         <button type="button" onClick={() => updateSounds(sounds.mappings.filter((_item, i) => i !== index), sounds.fallback)}>Remove mapping</button>
-      </div>)}
-      <button type="button" disabled={!soundAssets.length || !nextGroup} onClick={() => {
-        const asset = soundAssets[0];
-        if (!asset || !nextGroup) return;
-        updateSounds([...sounds.mappings, { target: { kind: 'group', group: nextGroup }, assetHash: soundHash(asset.assetId), volume: 1 }], sounds.fallback);
-      }}>Add key-group mapping</button>
+      </div>} />
       {!soundAssets.length && <p>No registered WAV assets are available. Add one through the media library to assign a typing sound.</p>}
     </fieldset>
     <fieldset>

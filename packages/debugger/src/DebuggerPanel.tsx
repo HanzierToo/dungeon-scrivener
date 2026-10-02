@@ -176,8 +176,17 @@ function AvailabilitySection({ title, items, transitions, query }: {
   );
 }
 
-export function DebuggerPanel({ world, snapshot, transitions, completeTraceHistory = false }: DebuggerPanelProps) {
+export function DebuggerPanel(props: DebuggerPanelProps) {
+  const [open, setOpen] = useState(false);
+  return <details open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>Playtest debugger</summary>
+    {open && <DebuggerContents {...props} />}
+  </details>;
+}
+
+function DebuggerContents({ world, snapshot, transitions, completeTraceHistory = false }: DebuggerPanelProps) {
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(0);
   const [enabledGroups, setEnabledGroups] = useState<ReadonlySet<TraceGroup>>(() => new Set(traceGroups.map(({ id }) => id)));
   const traceHistory = useMemo<AvailabilityTraceHistory>(() => ({
     completeFromSessionStart: completeTraceHistory,
@@ -188,9 +197,11 @@ export function DebuggerPanel({ world, snapshot, transitions, completeTraceHisto
     [world, snapshot, traceHistory],
   );
   const normalizedQuery = query.trim().toLowerCase();
-  const entries = transitions.flatMap((records, transitionIndex) => records.map((record) => ({ record, transitionIndex })));
-  const filteredEntries = entries.filter(({ record }) => enabledGroups.has(groupFor(record)) &&
-    `${record.kind} ${sourceLabel(record.source)} ${describeRecord(record)}`.toLowerCase().includes(normalizedQuery));
+  const filteredEntries = useMemo(() => transitions.flatMap((records, transitionIndex) => records.map((record) => ({ record, transitionIndex })))
+    .filter(({ record }) => enabledGroups.has(groupFor(record)) &&
+      `${record.kind} ${sourceLabel(record.source)} ${describeRecord(record)}`.toLowerCase().includes(normalizedQuery)),
+  [transitions, enabledGroups, normalizedQuery]);
+  const visiblePage = Math.min(page, Math.max(0, Math.ceil(filteredEntries.length / 100) - 1));
 
   function toggleGroup(group: TraceGroup, enabled: boolean): void {
     setEnabledGroups((previous) => {
@@ -202,13 +213,11 @@ export function DebuggerPanel({ world, snapshot, transitions, completeTraceHisto
   }
 
   return (
-    <details>
-      <summary>Playtest debugger</summary>
       <aside aria-label="Playtest trace debugger" style={panelStyle}>
         <div style={gridStyle}>
           <label style={rowStyle}>
             Search traces and availability
-            <input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+            <input type="search" value={query} onChange={(event) => { setQuery(event.currentTarget.value); setPage(0); }} />
           </label>
           <fieldset>
             <legend>Trace filters</legend>
@@ -231,7 +240,7 @@ export function DebuggerPanel({ world, snapshot, transitions, completeTraceHisto
             <h3>Chronological engine trace</h3>
             {filteredEntries.length === 0 ? <p>No trace records match the current filters.</p> : (
               <ol>
-                {filteredEntries.map(({ record, transitionIndex }) => (
+                {filteredEntries.slice(visiblePage * 100, (visiblePage + 1) * 100).map(({ record, transitionIndex }) => (
                   <li key={`${transitionIndex}:${record.sequence}`} style={entryStyle}>
                     <strong>Transition {transitionIndex + 1}, #{record.sequence}. {record.kind}</strong> · {sourceLabel(record.source)}
                     <p>{describeRecord(record)}</p>
@@ -239,9 +248,9 @@ export function DebuggerPanel({ world, snapshot, transitions, completeTraceHisto
                 ))}
               </ol>
             )}
+            {filteredEntries.length > 100 && <nav aria-label="Trace pages" style={rowStyle}><button type="button" disabled={visiblePage === 0} onClick={() => setPage(visiblePage - 1)}>Previous</button><span>{visiblePage * 100 + 1}–{Math.min((visiblePage + 1) * 100, filteredEntries.length)} of {filteredEntries.length}</span><button type="button" disabled={(visiblePage + 1) * 100 >= filteredEntries.length} onClick={() => setPage(visiblePage + 1)}>Next</button></nav>}
           </section>
         </div>
       </aside>
-    </details>
   );
 }

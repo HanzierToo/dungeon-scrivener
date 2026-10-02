@@ -8,7 +8,7 @@ import { exportGame } from '@dungeon-scrivener/exporter';
 import { createMediaAssetCatalog, type RegisteredAsset } from '@dungeon-scrivener/media';
 import { computeContentFingerprint, validateProject, validateProjectManifest, type CompiledScriptBundle, type Diagnostic, type LocaleDocument, type PlayerSaveArchive, type ProjectFile, type ProjectManifest, type ProjectVfsSnapshot, type SaveCompatibilityTarget, type SessionSnapshot, type WorldDocument } from '@dungeon-scrivener/model';
 import { clearRecovery, loadRecovery, saveRecovery } from '@dungeon-scrivener/persistence';
-import { readProjectFile, readProjectZip, writeProjectZip, createSnapshot } from '@dungeon-scrivener/vfs';
+import { addProjectFile, readProjectFile, readProjectZip, replaceProjectFile, writeProjectZip, createSnapshot } from '@dungeon-scrivener/vfs';
 import { SageMode, SageWorkspace } from '@dungeon-scrivener/sage';
 import { EnginePlayer, isOfflineSafeTheme, PORTABLE_PLAYER_ENGINE_VERSION } from '@dungeon-scrivener/player';
 import { downloadPlayerSave, getSaveSlotChoices, importHostedSaveFile } from '@dungeon-scrivener/player-save';
@@ -25,6 +25,30 @@ import './studio.css';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const GRAPH_LAYOUT_PATH = 'studio/graph-layout.json';
+const starterWorld = {
+  ...linearWorld,
+  nodes: [
+    {
+      ...linearWorld.nodes[0],
+      actions: { choices: [
+        ...(linearWorld.nodes[0]!.actions?.choices ?? []),
+        { id: 'climb-watchtower', label: { kind: 'literal', text: 'Climb to the watchtower' }, effects: [], navigationEdgeId: 'gate-to-tower' },
+      ] },
+    },
+    ...linearWorld.nodes.slice(1),
+    {
+      id: 'watchtower', parentId: null, visitable: true,
+      title: { kind: 'literal', text: 'The Watchtower' },
+      content: { kind: 'literal', text: 'From above, you spot a safe way across the river. Type “descend” to return to the bridge.' },
+      actions: { commands: [{ id: 'descend-tower', patterns: ['descend'], parameters: [], effects: [], navigationEdgeId: 'tower-to-bridge' }] },
+    },
+  ],
+  navigationEdges: [
+    ...linearWorld.navigationEdges,
+    { id: 'gate-to-tower', fromNodeId: 'old-gate', toNodeId: 'watchtower' },
+    { id: 'tower-to-bridge', fromNodeId: 'watchtower', toNodeId: 'stone-bridge' },
+  ],
+};
 type Mode = 'home' | 'sage' | 'apprentice' | 'playtest' | 'play';
 type PreparedProject = { snapshot: ProjectVfsSnapshot; manifest: ProjectManifest; world: WorldDocument; locales: LocaleDocument[]; scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog>; resolvedMedia: import('@dungeon-scrivener/model').ResolvedMediaAsset[]; themeCss: string };
 type PlayConfig = { scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog>; compatibility: SaveCompatibilityTarget; themeCss: string };
@@ -34,13 +58,19 @@ function snapshotFromData(manifest: unknown, world: unknown, locales: Record<str
   const files: ProjectFile[] = [
     { path: 'project.json', bytes: encoder.encode(JSON.stringify(manifest, null, 2)), role: 'manifest' as const },
     { path: 'world.json', bytes: encoder.encode(JSON.stringify(world, null, 2)), role: 'world' as const },
+    { path: GRAPH_LAYOUT_PATH, bytes: encoder.encode(JSON.stringify({ schemaVersion: 1, positions: {
+      'old-gate': { x: 0, y: 0 },
+      'stone-bridge': { x: -240, y: 240 },
+      'watchtower': { x: 240, y: 240 },
+      'lantern-house': { x: 0, y: 480 },
+    } }, null, 2)), role: 'arbitrary' as const },
     ...Object.entries(locales).map(([path, locale]) => ({ path, bytes: encoder.encode(JSON.stringify(locale, null, 2)), role: 'locale' as const })),
   ];
   return createSnapshot(files);
 }
 
 function parseFile(snapshot: ProjectVfsSnapshot, path: string): unknown {
-  const file = readProjectFile(snapshot, path);
+  const file = snapshot.files.get(path);
   if (!file) return undefined;
   try { return JSON.parse(decoder.decode(file.bytes)); } catch { return undefined; }
 }
@@ -110,6 +140,9 @@ function referencedMedia(world: WorldDocument, locales: readonly LocaleDocument[
 function App(): React.ReactElement {
   const [mode, setMode] = useState<Mode>('home');
   const [snapshot, setSnapshot] = useState<ProjectVfsSnapshot | null>(null);
+  const [analysisSnapshot, setAnalysisSnapshot] = useState<ProjectVfsSnapshot | null>(null);
+  const [diagnosticQuery, setDiagnosticQuery] = useState('');
+  const [diagnosticPage, setDiagnosticPage] = useState(0);
   const [revision, setRevision] = useState(0);
   const [status, setStatus] = useState('');
   const [operationError, setOperationError] = useState('');
@@ -134,6 +167,12 @@ function App(): React.ReactElement {
   const [tourKind, setTourKind] = useState<TourKind>('studio');
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [inspectorTab, setInspectorTab] = useState<'scene' | 'world' | 'scripts'>('scene');
+  const [inspectorWidth, setInspectorWidth] = useState(440);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [inspectorExpanded, setInspectorExpanded] = useState(false);
+  const [starterGuideVisible, setStarterGuideVisible] = useState(() => localStorage.getItem('dungeon-scrivener-starter-guide-v1') !== 'dismissed');
+  const apprenticeWorkbenchRef = useRef<HTMLDivElement>(null);
+  const resizingInspector = useRef(false);
   const [recoveryProjectId, setRecoveryProjectId] = useState<string | null>(null);
   const [playSnapshot, setPlaySnapshot] = useState<SessionSnapshot>();
   const [playConfig, setPlayConfig] = useState<PlayConfig>();
@@ -145,27 +184,65 @@ function App(): React.ReactElement {
   const [acknowledged, setAcknowledged] = useState<Set<string>>(() => new Set());
   const workspaceRef = useRef<SageWorkspace | null>(null);
   const snapshotRef = useRef<ProjectVfsSnapshot | null>(null);
-  const manifest = useMemo(() => snapshot ? parseFile(snapshot, 'project.json') as ProjectManifest | undefined : undefined, [snapshot, revision]);
-  const world = useMemo(() => snapshot ? parseFile(snapshot, 'world.json') as WorldDocument | undefined : undefined, [snapshot, revision]);
-  const graphPositions = useMemo(() => snapshot ? readGraphPositions(snapshot) : {}, [snapshot]);
-  const locales = useMemo(() => snapshot ? [...snapshot.files.keys()]
+  const manifestFile = snapshot?.files.get('project.json');
+  const worldFile = snapshot?.files.get('world.json');
+  const layoutFile = snapshot?.files.get(GRAPH_LAYOUT_PATH);
+  const manifest = useMemo(() => snapshot ? parseFile(snapshot, 'project.json') as ProjectManifest | undefined : undefined, [manifestFile]);
+  const worldCache = useRef<{ file: ProjectFile; value: WorldDocument } | undefined>(undefined);
+  const world = useMemo(() => {
+    if (!snapshot || !worldFile) return undefined;
+    if (worldCache.current?.file === worldFile) return worldCache.current.value;
+    const value = parseFile(snapshot, 'world.json') as WorldDocument | undefined;
+    if (value) worldCache.current = { file: worldFile, value };
+    return value;
+  }, [worldFile]);
+  const graphPositions = useMemo(() => snapshot ? readGraphPositions(snapshot) : {}, [layoutFile]);
+  const localeCache = useRef(new Map<string, { file: ProjectFile; value: LocaleDocument | undefined }>());
+  const previousLocales = useRef<LocaleDocument[]>([]);
+  const locales = useMemo(() => {
+    const next: LocaleDocument[] = [];
+    for (const [path, file] of snapshot?.files ?? []) {
+      if (!/^locales\/[^/]+\.json$/u.test(path)) continue;
+      const cached = localeCache.current.get(path);
+      const value = cached?.file === file ? cached.value : parseFile(snapshot!, path) as LocaleDocument | undefined;
+      localeCache.current.set(path, { file, value });
+      if (value && typeof value === 'object' && 'locale' in value) next.push(value);
+    }
+    if (next.length === previousLocales.current.length && next.every((value, index) => value === previousLocales.current[index])) return previousLocales.current;
+    previousLocales.current = next;
+    return next;
+  }, [snapshot]);
+  const analysisManifest = useMemo(() => analysisSnapshot ? parseFile(analysisSnapshot, 'project.json') as ProjectManifest | undefined : undefined, [analysisSnapshot]);
+  const analysisWorld = useMemo(() => analysisSnapshot ? parseFile(analysisSnapshot, 'world.json') as WorldDocument | undefined : undefined, [analysisSnapshot]);
+  const analysisLocales = useMemo(() => analysisSnapshot ? [...analysisSnapshot.files.keys()]
     .filter(path => /^locales\/[^/]+\.json$/u.test(path))
-    .map(path => parseFile(snapshot, path))
-    .filter((item): item is LocaleDocument => typeof item === 'object' && item !== null && 'locale' in item) : [], [snapshot, revision]);
-  const localeMap = useMemo(() => Object.fromEntries(locales.map(locale => [`locales/${locale.locale}.json`, locale])), [locales]);
-  const assetHashes = useMemo(() => new Set([...(snapshot?.files.keys() ?? [])].flatMap(path => {
+    .map(path => parseFile(analysisSnapshot, path))
+    .filter((item): item is LocaleDocument => typeof item === 'object' && item !== null && 'locale' in item) : [], [analysisSnapshot]);
+  const analysisLocaleMap = useMemo(() => Object.fromEntries(analysisLocales.map(locale => [`locales/${locale.locale}.json`, locale])), [analysisLocales]);
+  const assetHashes = useMemo(() => new Set([...(analysisSnapshot?.files.keys() ?? [])].flatMap(path => {
     const match = /^assets\/sha256\/([a-f0-9]{64})$/u.exec(path);
     return match ? [match[1]!] : [];
-  })), [snapshot]);
-  const report = useMemo(() => manifest && world && snapshot && diagnosticMedia?.snapshot === snapshot
-    ? collectDiagnostics({ manifest, world, locales: localeMap, filePaths: new Set(snapshot.files.keys()), assetHashes, assets: diagnosticMedia.media, additionalDiagnostics: diagnosticMedia.diagnostics })
-    : undefined, [manifest, world, localeMap, snapshot, assetHashes, diagnosticMedia]);
-  const validation = useMemo(() => manifest && world ? validateProject({ manifest, world, locales: localeMap, filePaths: new Set(snapshot?.files.keys()), assetHashes }) : undefined, [manifest, world, localeMap, snapshot, assetHashes]);
+  })), [analysisSnapshot]);
+  const report = useMemo(() => analysisManifest && analysisWorld && analysisSnapshot && diagnosticMedia?.snapshot === analysisSnapshot
+    ? collectDiagnostics({ manifest: analysisManifest, world: analysisWorld, locales: analysisLocaleMap, filePaths: new Set(analysisSnapshot.files.keys()), assetHashes, assets: diagnosticMedia.media, additionalDiagnostics: diagnosticMedia.diagnostics })
+    : undefined, [analysisManifest, analysisWorld, analysisLocaleMap, analysisSnapshot, assetHashes, diagnosticMedia]);
+  const visibleDiagnostics = useMemo(() => report?.diagnostics.filter(item =>
+    `${item.severity} ${item.code} ${item.path ?? ''} ${item.message}`.toLocaleLowerCase().includes(diagnosticQuery.trim().toLocaleLowerCase())) ?? [], [report, diagnosticQuery]);
+  const visibleDiagnosticPage = Math.min(diagnosticPage, Math.max(0, Math.ceil(visibleDiagnostics.length / 50) - 1));
   const activeEngine = useMemo(() => playConfig ? createGameEngine({
     scriptExecutor, mediaAssets: playConfig.media,
     seededSeedSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! },
     unseededRandomSource: { nextUint32: () => crypto.getRandomValues(new Uint32Array(1))[0]! },
   }, playConfig.scripts) : undefined, [playConfig]);
+
+  useEffect(() => {
+    if (!inspectorExpanded) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setInspectorExpanded(false); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => { document.body.style.overflow = previous; window.removeEventListener('keydown', onKeyDown); };
+  }, [inspectorExpanded]);
 
   useEffect(() => {
     if (tourPhase === 'invite' && tourKind !== 'studio' && tourKind !== 'tutorial' && tourKind !== mode) {
@@ -178,15 +255,21 @@ function App(): React.ReactElement {
   }, [snapshot, mode, tourPhase, tourKind]);
 
   useEffect(() => {
-    if (!snapshot || !world) return;
+    if (!snapshot) { setAnalysisSnapshot(null); return; }
+    const timer = window.setTimeout(() => setAnalysisSnapshot(snapshot), 350);
+    return () => window.clearTimeout(timer);
+  }, [snapshot]);
+
+  useEffect(() => {
+    if (!analysisSnapshot || !analysisWorld) return;
     let active = true;
     const media = createMediaAssetCatalog();
     void (async () => {
       const diagnostics: Diagnostic[] = [];
-      const referenced = referencedMedia(world, locales);
-      const assetPaths = [...snapshot.files.keys()].filter(path => /^assets\/sha256\/[a-f0-9]{64}$/u.test(path));
+      const referenced = referencedMedia(analysisWorld, analysisLocales);
+      const assetPaths = [...analysisSnapshot.files.keys()].filter(path => /^assets\/sha256\/[a-f0-9]{64}$/u.test(path));
       for (const path of assetPaths) {
-        const file = readProjectFile(snapshot, path);
+        const file = readProjectFile(analysisSnapshot, path);
         if (!file) continue;
         const assetId = `sha256:${path.slice('assets/sha256/'.length)}` as `sha256:${string}`;
         try { await media.registerAsset({ bytes: file.bytes, originalFilename: 'managed-asset', expectedAssetId: assetId }); }
@@ -196,12 +279,12 @@ function App(): React.ReactElement {
       }
       for (const assetId of referenced) {
         const path = `assets/sha256/${assetId.slice('sha256:'.length)}`;
-        if (!snapshot.files.has(path)) diagnostics.push({ code: 'DS-MEDIA-MISSING', severity: 'error', message: `Referenced media asset is missing: ${path}`, path, blocks: ['play', 'export'] });
+        if (!analysisSnapshot.files.has(path)) diagnostics.push({ code: 'DS-MEDIA-MISSING', severity: 'error', message: `Referenced media asset is missing: ${path}`, path, blocks: ['play', 'export'] });
       }
-      if (active) setDiagnosticMedia({ snapshot, media, diagnostics });
+      if (active) setDiagnosticMedia({ snapshot: analysisSnapshot, media, diagnostics });
     })();
     return () => { active = false; };
-  }, [snapshot, world, locales]);
+  }, [analysisSnapshot, analysisWorld, analysisLocales]);
 
   useEffect(() => {
     const savedId = localStorage.getItem('dungeon-scrivener-last-project');
@@ -304,7 +387,7 @@ function App(): React.ReactElement {
     setSnapshot(next);
     setRecoveryProjectId(next.projectId);
     localStorage.setItem('dungeon-scrivener-last-project', next.projectId);
-    workspaceRef.current = createSageWorkspace(next);
+    workspaceRef.current = initialMode === 'sage' ? createSageWorkspace(next) : null;
     setRevision(value => value + 1);
     setAcknowledged(new Set());
     setUnsavedSince(unsaved ? Date.now() : undefined);
@@ -331,7 +414,20 @@ function App(): React.ReactElement {
     }
   }
 
-  function currentReport(): readonly Diagnostic[] { return report?.diagnostics ?? []; }
+  function currentReport(): readonly Diagnostic[] {
+    const current = snapshotRef.current ?? snapshot;
+    if (!current) return [];
+    if (current === analysisSnapshot && report) return report.diagnostics;
+    const currentManifest = parseFile(current, 'project.json');
+    const currentWorld = parseFile(current, 'world.json');
+    const currentLocales = Object.fromEntries([...current.files.keys()]
+      .filter(path => /^locales\/[^/]+\.json$/u.test(path)).map(path => [path, parseFile(current, path)]));
+    return collectDiagnostics({ manifest: currentManifest, world: currentWorld, locales: currentLocales,
+      filePaths: new Set(current.files.keys()), assetHashes: new Set([...current.files.keys()].flatMap(path => {
+        const match = /^assets\/sha256\/([a-f0-9]{64})$/u.exec(path);
+        return match ? [match[1]!] : [];
+      })) }).diagnostics;
+  }
 
   function failOperation(message: string): void { setOperationError(message); setErrorDialogOpen(true); setStatus(message); }
 
@@ -404,17 +500,19 @@ function App(): React.ReactElement {
   }
 
   function requestAction(action: StudioAction, run: () => void): void {
-    const decision = getAcknowledgementStatus(currentReport(), action, acknowledged);
+    const diagnostics = currentReport();
+    const decision = getAcknowledgementStatus(diagnostics, action, acknowledged);
     if (!decision.required || decision.acknowledged) { run(); return; }
-    const pending = currentReport().filter(item => item.severity === 'warning' && item.acknowledgementRequired?.includes(action) && !acknowledged.has(item.code));
+    const pending = diagnostics.filter(item => item.severity === 'warning' && item.acknowledgementRequired?.includes(action) && !acknowledged.has(item.code));
     setConfirmation({ action, warnings: pending, run });
   }
 
   async function saveZip(): Promise<void> {
-    if (!snapshot) return;
+    const current = snapshotRef.current ?? snapshot;
+    if (!current) return;
     try {
-      download(await writeProjectZip(snapshot), `${manifest?.projectId ?? snapshot.projectId}.zip`, 'application/zip');
-      await clearRecovery(snapshot.projectId);
+      download(await writeProjectZip(current), `${manifest?.projectId ?? current.projectId}.zip`, 'application/zip');
+      await clearRecovery(current.projectId);
       setRecoveryAvailable(false);
       setUnsavedSince(undefined);
       setReminderVisible(false);
@@ -427,13 +525,11 @@ function App(): React.ReactElement {
   function updateWorld(next: WorldDocument): void {
     if (!snapshot) return;
     const current = snapshotRef.current ?? snapshot;
-    const files = [...current.files.values()].map(file => file.path === 'world.json'
-      ? { ...file, bytes: encoder.encode(JSON.stringify(next, null, 2)) }
-      : file);
-    const updated = createSnapshot(files, current.directories);
+    const updated = replaceProjectFile(current, 'world.json', encoder.encode(JSON.stringify(next, null, 2)));
+    worldCache.current = { file: updated.files.get('world.json')!, value: next };
     snapshotRef.current = updated;
     setSnapshot(updated);
-    workspaceRef.current = createSageWorkspace(updated);
+    workspaceRef.current = null;
     setUnsavedSince(Date.now());
     setReminderVisible(false);
     setStatus('Apprentice changes saved to the project.');
@@ -444,12 +540,12 @@ function App(): React.ReactElement {
     const current = snapshotRef.current;
     if (!current) return;
     const bytes = encoder.encode(JSON.stringify({ schemaVersion: 1, positions }, null, 2));
-    const files = [...current.files.values()].filter(file => file.path !== GRAPH_LAYOUT_PATH);
-    files.push({ path: GRAPH_LAYOUT_PATH, bytes, role: 'arbitrary' });
-    const updated = createSnapshot(files, current.directories);
+    const updated = current.files.has(GRAPH_LAYOUT_PATH)
+      ? replaceProjectFile(current, GRAPH_LAYOUT_PATH, bytes)
+      : addProjectFile(current, { path: GRAPH_LAYOUT_PATH, bytes, role: 'arbitrary' });
     snapshotRef.current = updated;
     setSnapshot(updated);
-    workspaceRef.current = createSageWorkspace(updated);
+    workspaceRef.current = null;
     setUnsavedSince(Date.now());
     setReminderVisible(false);
     setRevision(value => value + 1);
@@ -458,14 +554,19 @@ function App(): React.ReactElement {
   function updateLocales(nextLocales: readonly LocaleDocument[]): void {
     const current = snapshotRef.current;
     if (!current) return;
-    const replacements = new Map(nextLocales.map(locale => [`locales/${locale.locale}.json`, encoder.encode(JSON.stringify(locale, null, 2))]));
-    const files = [...current.files.values()].map(file => replacements.has(file.path)
-      ? { ...file, bytes: replacements.get(file.path)! } : file);
-    for (const [path, bytes] of replacements) if (!current.files.has(path)) files.push({ path, bytes, role: 'locale' });
-    const updated = createSnapshot(files, current.directories);
+    let updated = current;
+    for (const locale of nextLocales) {
+      if (locales.some(existing => existing.locale === locale.locale && existing === locale)) continue;
+      const path = `locales/${locale.locale}.json`;
+      const bytes = encoder.encode(JSON.stringify(locale, null, 2));
+      updated = updated.files.has(path)
+        ? replaceProjectFile(updated, path, bytes)
+        : addProjectFile(updated, { path, bytes, role: 'locale' });
+    }
+    if (updated === current) return;
     snapshotRef.current = updated;
     setSnapshot(updated);
-    workspaceRef.current = createSageWorkspace(updated);
+    workspaceRef.current = null;
     setUnsavedSince(Date.now());
     setReminderVisible(false);
     setRevision(value => value + 1);
@@ -482,7 +583,7 @@ function App(): React.ReactElement {
       const updated = createSnapshot([...current.files.values(), { path, bytes, role: 'asset' }], current.directories);
       snapshotRef.current = updated;
       setSnapshot(updated);
-      workspaceRef.current = createSageWorkspace(updated);
+      workspaceRef.current = null;
       setUnsavedSince(Date.now());
       setReminderVisible(false);
       setRevision(value => value + 1);
@@ -644,7 +745,7 @@ function App(): React.ReactElement {
           return;
         }
         setNewProjectError('');
-        openProject(snapshotFromData(manifestResult.value, linearWorld, { 'locales/en-GB.json': linearLocale }), 'Starter project created.', true, 'apprentice');
+        openProject(snapshotFromData(manifestResult.value, starterWorld, { 'locales/en-GB.json': linearLocale }), 'Starter project created.', true, 'apprentice');
         if (shouldOfferStudioTour()) { setTourKind('studio'); setTourPhase('invite'); }
       }}>Create project</button>
         </div>
@@ -698,27 +799,37 @@ function App(): React.ReactElement {
         setRevision(value => value + 1);
       }
     }} />}
-    {mode === 'apprentice' && world && <div className="apprentice-workbench">
+    {mode === 'apprentice' && world && <div ref={apprenticeWorkbenchRef} className={`apprentice-workbench${inspectorCollapsed ? ' is-collapsed' : ''}${inspectorExpanded ? ' is-expanded' : ''}`} style={{ '--inspector-width': `${inspectorWidth}px` } as React.CSSProperties}>
       <div className="apprentice-map"><ApprenticeGraph world={world} positions={graphPositions} onPositionsChange={updateGraphPositions} {...(selectedNodeId ? { selectedNodeId } : {})}
         nodeLabels={Object.fromEntries(world.nodes.map(node => [node.id, node.title.kind === 'literal' ? node.title.text : locales.find(locale => locale.locale === manifest?.defaultLocale)?.strings[node.title.key] ?? node.title.key]))}
-        onSelectNode={nodeId => { setSelectedNodeId(nodeId); setInspectorTab('scene'); }} onWorldChange={updateWorld} /></div>
+        onSelectNode={nodeId => { setSelectedNodeId(nodeId); setInspectorTab('scene'); }} onWorldChange={updateWorld} />
+      </div>
+      {!inspectorCollapsed && <div className="apprentice-divider" role="separator" aria-label="Resize inspector" aria-orientation="vertical" aria-valuemin={320} aria-valuemax={900} aria-valuenow={inspectorWidth} tabIndex={0}
+        onPointerDown={event => { resizingInspector.current = true; event.currentTarget.setPointerCapture(event.pointerId); }}
+        onPointerMove={event => { if (!resizingInspector.current) return; const rect = apprenticeWorkbenchRef.current?.getBoundingClientRect(); if (rect) setInspectorWidth(Math.max(320, Math.min(rect.width - 320, rect.right - event.clientX))); }}
+        onPointerUp={event => { resizingInspector.current = false; event.currentTarget.releasePointerCapture(event.pointerId); }}
+        onPointerCancel={() => { resizingInspector.current = false; }}
+        onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setInspectorWidth(width => Math.max(320, Math.min(900, width + (event.key === 'ArrowLeft' ? 24 : -24)))); } }} />}
       <aside className="apprentice-inspector" aria-label="Story inspector">
-        <div className="apprentice-inspector__heading"><span className="eyebrow">THE INSPECTOR</span><h2>{inspectorTab === 'scene' ? 'Scene details' : inspectorTab === 'world' ? 'World settings' : 'Scripts'}</h2></div>
+        <div className="apprentice-inspector__heading"><button type="button" className="apprentice-inspector__collapse" aria-label={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'} title={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'} onClick={() => { setInspectorCollapsed(value => !value); setInspectorExpanded(false); }}>{inspectorCollapsed ? '‹' : '›'}</button>{!inspectorCollapsed && <><div><span className="eyebrow">THE INSPECTOR</span><h2>{inspectorTab === 'scene' ? world.nodes.find(node => node.id === selectedNodeId)?.visitable === false ? 'Folder details' : 'Scene details' : inspectorTab === 'world' ? 'World settings' : 'Scripts'}</h2></div><button type="button" className="apprentice-inspector__expand" aria-label={inspectorExpanded ? 'Exit workspace full screen' : 'Workspace full screen'} title={inspectorExpanded ? 'Exit workspace full screen' : 'Expand map and inspector'} onClick={() => setInspectorExpanded(value => !value)}>{inspectorExpanded ? '↙' : '⤢'}</button></>}</div>
+        {!inspectorCollapsed && <>
         <div className="apprentice-inspector__tabs" role="tablist" aria-label="Inspector sections">
           <button role="tab" aria-selected={inspectorTab === 'scene'} onClick={() => setInspectorTab('scene')}>Scene</button>
           <button role="tab" aria-selected={inspectorTab === 'world'} onClick={() => setInspectorTab('world')}>World</button>
           <button role="tab" aria-selected={inspectorTab === 'scripts'} onClick={() => setInspectorTab('scripts')}>Scripts</button>
         </div>
+        {starterGuideVisible && inspectorTab === 'scene' && world.entryNodeId === 'old-gate' && <aside className="apprentice-starter-guide" aria-label="Start making your game"><button type="button" className="apprentice-starter-guide__close" aria-label="Dismiss starter guide" onClick={() => { localStorage.setItem('dungeon-scrivener-starter-guide-v1', 'dismissed'); setStarterGuideVisible(false); }}>×</button><span className="eyebrow">START HERE</span><h2>Make this story yours</h2><ol><li>Try the sample gate and watchtower routes.</li><li>Select The Old Gate and rewrite its opening.</li><li>Add a scene, draw a route, then give a choice that route.</li></ol><div><button type="button" onClick={() => requestAction('play', () => { void startPlaytest(); })}>Try sample story</button><button type="button" onClick={() => { setTourKind('tutorial'); setTourPhase('invite'); }}>Game tutorial</button></div></aside>}
         {inspectorTab !== 'scripts' && <ApprenticeForms world={world} view={inspectorTab} {...(selectedNodeId ? { selectedNodeId } : {})} onWorldChange={updateWorld}
           project={snapshot} locales={locales} defaultLocale={manifest?.defaultLocale}
-          assets={diagnosticMedia?.snapshot === snapshot ? diagnosticMedia.media.listAssets() : []}
-          mediaAssets={diagnosticMedia?.snapshot === snapshot ? diagnosticMedia.media : undefined}
+          assets={diagnosticMedia?.snapshot.projectId === snapshot.projectId ? diagnosticMedia.media.listAssets() : []}
+          mediaAssets={diagnosticMedia?.snapshot.projectId === snapshot.projectId ? diagnosticMedia.media : undefined}
           onLocalesChange={updateLocales} onImportAsset={importMediaAsset} />}
         {inspectorTab === 'scripts' && <ApprenticeScripts world={world} project={snapshot} onEditInSage={path => {
           const current = snapshotRef.current ?? snapshot;
           workspaceRef.current = createSageWorkspace(current, path);
           setMode('sage');
         }} />}
+        </>}
       </aside>
     </div>}
     {mode === 'playtest' && world && playSnapshot && activeEngine && <PlaytestDebugger world={world} initialSnapshot={playSnapshot}
@@ -734,9 +845,15 @@ function App(): React.ReactElement {
       saveSlots={getSaveSlotChoices(world.savePolicy)} onSave={saveHosted}
       {...(world.savePolicy.enabled ? { onLoad: (file: File) => { void loadHosted(file); } } : {})}
     />}
-    {validation && report && <aside className="diagnostics" id="project-diagnostics" tabIndex={-1} aria-label="Project diagnostics" aria-live="polite">
+    {snapshot !== analysisSnapshot && <aside className="diagnostics" id="project-diagnostics" role="status">Checking project diagnostics…</aside>}
+    {snapshot === analysisSnapshot && report && <aside className="diagnostics" id="project-diagnostics" tabIndex={-1} aria-label="Project diagnostics" aria-live="polite">
       <div className="diagnostics__heading"><strong>Project diagnostics</strong><span className={report.diagnostics.length ? 'diagnostics__count has-issues' : 'diagnostics__count'}>{report.diagnostics.length ? `${report.diagnostics.length} to review` : 'All clear'}</span></div>
-      {report.diagnostics.length ? <ul>{report.diagnostics.map((item, index) => <li key={`${item.code}:${index}`}>{item.severity}: {item.code}: {diagnosticMessage(item, world, locales.find(locale => locale.locale === manifest?.defaultLocale))}</li>)}</ul> : <p>No diagnostics.</p>}
+      {report.diagnostics.length > 10 && <input type="search" aria-label="Filter project diagnostics" value={diagnosticQuery} onChange={event => { setDiagnosticQuery(event.target.value); setDiagnosticPage(0); }} placeholder="Find a code, file, or message" />}
+      {report.diagnostics.length ? <>
+        <ul>{visibleDiagnostics.slice(visibleDiagnosticPage * 50, (visibleDiagnosticPage + 1) * 50).map((item, index) => <li key={`${item.code}:${visibleDiagnosticPage * 50 + index}`}>{item.severity}: {item.code}: {diagnosticMessage(item, world, locales.find(locale => locale.locale === manifest?.defaultLocale))}</li>)}</ul>
+        {visibleDiagnostics.length === 0 && <p>No matching diagnostics.</p>}
+        {visibleDiagnostics.length > 50 && <nav className="diagnostics__pages" aria-label="Diagnostic pages"><button type="button" disabled={visibleDiagnosticPage === 0} onClick={() => setDiagnosticPage(visibleDiagnosticPage - 1)}>Previous</button><span>{visibleDiagnosticPage * 50 + 1}–{Math.min((visibleDiagnosticPage + 1) * 50, visibleDiagnostics.length)} of {visibleDiagnostics.length}</span><button type="button" disabled={(visibleDiagnosticPage + 1) * 50 >= visibleDiagnostics.length} onClick={() => setDiagnosticPage(visibleDiagnosticPage + 1)}>Next</button></nav>}
+      </> : <p>No diagnostics.</p>}
     </aside>}
     <button className="clear-recovery" onClick={async () => {
       if (!snapshot) return;
@@ -768,7 +885,13 @@ function App(): React.ReactElement {
       <h2 id="error-title">Action could not continue</h2><p>{operationError}</p>
       <button autoFocus onClick={() => setErrorDialogOpen(false)}>Close</button>
     </dialog>
-    <StudioTour phase={tourPhase} kind={tourKind} mode={mode} onModeChange={setMode} onClose={(outcome, kind) => {
+    <StudioTour phase={tourPhase} kind={tourKind} mode={mode} onModeChange={nextMode => {
+      if (nextMode === 'sage') {
+        const current = snapshotRef.current;
+        if (current && (!workspaceRef.current || workspaceRef.current.getState().snapshot !== current)) workspaceRef.current = createSageWorkspace(current);
+      }
+      setMode(nextMode);
+    }} onClose={(outcome, kind) => {
       if (kind === 'studio' && outcome === 'finished') {
         setMode(localStorage.getItem('dungeon-scrivener-preferred-mode') === 'sage' ? 'sage' : 'apprentice');
         if (localStorage.getItem('dungeon-scrivener-tutorial-tour-v1') === null) { setTourKind('tutorial'); setTourPhase('invite'); return; }

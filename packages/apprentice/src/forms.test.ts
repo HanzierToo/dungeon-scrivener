@@ -102,7 +102,8 @@ describe('Apprentice shared-model forms', () => {
     expect(html).toContain('keeper-check');
     expect(html).toContain('JavaScript');
     expect(html).toContain('main');
-    expect(html.match(/Edit in Sage/g)).toHaveLength(3);
+    for (const script of world.scripts) expect(html).toContain(script.id);
+    expect(html.match(/Edit in Sage/g)).toHaveLength(1);
     expect(sageTargets).toEqual([]);
     expect((edited ?? prepared).scripts).toEqual(world.scripts);
     for (const [path, bytes] of sourceBytesBefore) expect(snapshot.files.get(path)?.bytes).toEqual(bytes);

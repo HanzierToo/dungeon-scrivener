@@ -155,7 +155,7 @@ export function RichContentEditor({ value, onChange, world, locales = [], defaul
     }
   };
 
-  return <section aria-label="Visual Markdown editor" style={{ display: 'grid', gap: 8 }}>
+  return <section className="apprentice-rich-content" aria-label="Visual Markdown editor">
     <h3>Node text</h3>
     <label>Content source <select value={value.kind} onChange={(event) => onChange(event.target.value === 'literal' ? { kind: 'literal', text: source } : { kind: 'locale-key', key: '' })}><option value="literal">Markdown text</option><option value="locale-key">Translation key</option></select></label>
     {value.kind === 'locale-key' && <>
@@ -169,14 +169,14 @@ export function RichContentEditor({ value, onChange, world, locales = [], defaul
       <button type="button" role="tab" aria-selected={sourceMode} onClick={() => setSourceMode(true)}>Source escape hatch</button>
     </div>
     {!sourceMode && <div role="toolbar" aria-label="Markdown formatting">
-      <button type="button" disabled={!editAvailable} onClick={() => insert('**')}>Bold</button>
-      <button type="button" disabled={!editAvailable} onClick={() => insert('*')}>Italic</button>
-      <button type="button" disabled={!editAvailable} onClick={() => insert('`')}>Code</button>
-      <button type="button" disabled={!editAvailable} onClick={() => insert('## ', '\n')}>Heading</button>
-      <button type="button" disabled={!editAvailable} onClick={() => insert('> ', '\n')}>Callout / quote</button>
-      <button type="button" disabled={!editAvailable} onClick={() => insert('- ', '\n')}>List item</button>
-      <button type="button" disabled={!editAvailable} onClick={() => insert('[', '](https://)')}>Link</button>
-      <button type="button" disabled={!editAvailable} onClick={() => insert('```\n', '\n```')}>Code block</button>
+      <button type="button" aria-label="Bold" title="Bold" disabled={!editAvailable} onClick={() => insert('**')}><strong aria-hidden="true">B</strong></button>
+      <button type="button" aria-label="Italic" title="Italic" disabled={!editAvailable} onClick={() => insert('*')}><em aria-hidden="true">I</em></button>
+      <button type="button" aria-label="Code" title="Inline code" disabled={!editAvailable} onClick={() => insert('`')}><code aria-hidden="true">&lt;/&gt;</code></button>
+      <button type="button" aria-label="Heading" title="Heading" disabled={!editAvailable} onClick={() => insert('## ', '\n')}><span aria-hidden="true">H<small>2</small></span></button>
+      <button type="button" aria-label="Callout / quote" title="Quote" disabled={!editAvailable} onClick={() => insert('> ', '\n')}><span aria-hidden="true">❝</span></button>
+      <button type="button" aria-label="List item" title="List item" disabled={!editAvailable} onClick={() => insert('- ', '\n')}><span aria-hidden="true">• ≡</span></button>
+      <button type="button" aria-label="Link" title="Link" disabled={!editAvailable} onClick={() => insert('[', '](https://)')}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7 .5l3-3a5 5 0 0 0-7-7l-2 2"/><path d="M14 11a5 5 0 0 0-7-.5l-3 3a5 5 0 0 0 7 7l2-2"/></svg></button>
+      <button type="button" aria-label="Code block" title="Code block" disabled={!editAvailable} onClick={() => insert('```\n', '\n```')}><code aria-hidden="true">{'{ }'}</code></button>
     </div>}
     <textarea ref={textarea} aria-label={sourceMode ? 'Markdown source' : 'Markdown visual editor source'} rows={12} style={{ fontFamily: 'monospace', width: '100%' }} value={source} readOnly={!editAvailable} onChange={(event) => commitSource(event.target.value)} />
     <section aria-label="Rendered Markdown preview">

@@ -1,5 +1,7 @@
 # DungeonScrivener 1.0 release evidence: 29C
 
+This is historical 1.0 candidate evidence. See [v1.2 follow-up verification](1.2-follow-up-evidence.md) for the current local browser matrix and the accepted WebKit offline-reload skip.
+
 Status: candidate evidence for independent phase 3 review. This is not a 1.0 release approval.
 
 Build source was the shared worktree at base revision `8d766129377ad20f56edfa68d5b0536a0e336444`; accepted 29A/29B and concurrent package changes were uncommitted. The artifact hashes below identify the built output precisely. The base revision alone is not the candidate source snapshot.

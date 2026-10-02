@@ -72,7 +72,8 @@ describe('Apprentice rich content and author settings', () => {
     expect(richEditor).toContain('Source escape hatch');
     expect(richEditor).toContain('Future block syntax remains authored.');
     const sageBlock = renderToStaticMarkup(createElement(ApprenticeScripts, { world: editedWorld ?? world, project, onEditInSage: () => undefined }));
-    expect(sageBlock.match(/Edit in Sage/g)).toHaveLength(3);
+    for (const script of world.scripts) expect(sageBlock).toContain(script.id);
+    expect(sageBlock.match(/Edit in Sage/g)).toHaveLength(1);
     const settings = renderToStaticMarkup(createElement(ApprenticeAuthorSettings, { world, project, assets, onWorldChange: () => undefined }));
     expect(settings).toContain('Player CSS theme');
     expect(settings).toContain('Typing sound mappings');

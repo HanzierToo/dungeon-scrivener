@@ -16,9 +16,9 @@ const steps: Record<TourKind, readonly Step[]> = {
     { mode: 'sage', selector: '[data-tour="game-export"]', eyebrow: 'Publish', title: 'Make a playable game', body: 'Export creates a separate game ZIP for readers. Extract it, then open index.html.' },
   ],
   apprentice: [
-    { mode: 'apprentice', selector: '.apprentice-map', eyebrow: 'Story map', title: 'Follow the scenes', body: 'Each box is a scene or folder. Drag boxes to arrange your map. Teal arrows are player routes; grey dashed lines show folder containment.' },
-    { mode: 'apprentice', selector: '[data-tour="graph-toolbar"]', eyebrow: 'Build', title: 'Add and connect', body: 'Add a scene, then drag from its bottom dot to another scene’s top dot to make a player route. You can also select a scene and choose a destination here. A new scene warns as unreachable until you link it from the entry path.' },
-    { mode: 'apprentice', selector: '.apprentice-inspector', eyebrow: 'Details', title: 'Write what players see', body: 'Select a scene and edit its title, text, actions, and world settings in the inspector.' },
+    { mode: 'apprentice', selector: '.apprentice-map', eyebrow: 'Story map', title: 'Follow the scenes', body: 'Each box is a scene or folder. Drag boxes to arrange your map. Teal arrows are player routes; grey dashed lines show folder containment. Right-click a scene or route for actions.' },
+    { mode: 'apprentice', selector: '[data-tour="graph-toolbar"]', eyebrow: 'Build', title: 'Add and connect', body: 'Add a scene, then drag from its bottom dot to another scene’s top dot to make a player route. Open Map tools for folders, undo, and precise link or parent choices.' },
+    { mode: 'apprentice', selector: '.apprentice-inspector', eyebrow: 'Details', title: 'Write what players see', body: 'Select a scene. Start with its title, story text, and player actions. Small ? buttons explain each section. Collapse, resize, or expand this panel when you need more room.' },
   ],
   sage: [
     { mode: 'sage', selector: '.sage-file-tree', eyebrow: 'Explorer', title: 'Browse the project', body: 'Choose folder hierarchy or flat paths and sort by name or type. Right-click a row for file actions.' },
@@ -35,9 +35,9 @@ const steps: Record<TourKind, readonly Step[]> = {
     { mode: 'play', selector: '.ds-player__layout', eyebrow: 'Your move', title: 'Choose an action', body: 'Select a choice or type a command when the game offers one. Inventory and settings are nearby.' },
   ],
   tutorial: [
-    { mode: 'apprentice', selector: '.apprentice-map', eyebrow: 'Game tutorial · 1', title: 'Start with a scene', body: 'A game begins at its entry scene. The Old Gate is already your entry point. Give it an opening that poses a question or goal.' },
-    { mode: 'apprentice', selector: '[data-tour="graph-toolbar"]', eyebrow: 'Game tutorial · 2', title: 'Add a destination', body: 'Add a scene for what happens next. Drag it into place, then connect the entry scene’s bottom dot to its top dot. The unreachable-scene warning clears once there is a route from the entry. Give each scene a distinct title.' },
-    { mode: 'apprentice', selector: '.apprentice-inspector', eyebrow: 'Game tutorial · 3', title: 'Write a meaningful choice', body: 'Select the entry scene. Give its action a clear verb and consequence, then link it to your destination.' },
+    { mode: 'apprentice', selector: '.apprentice-map', eyebrow: 'Game tutorial · 1', title: 'Start with a scene', body: 'The Old Gate is the entry. This sample offers two routes: the gate and the watchtower. Play both, then rewrite the opening to give the player a goal.' },
+    { mode: 'apprentice', selector: '[data-tour="graph-toolbar"]', eyebrow: 'Game tutorial · 2', title: 'Build a branch', body: 'Add a new scene and drag it into place. Connect a reachable scene’s bottom dot to its top dot. A map route becomes playable when a choice or command uses that route.' },
+    { mode: 'apprentice', selector: '.apprentice-inspector', eyebrow: 'Game tutorial · 3', title: 'Make a consequential action', body: 'Select a scene. Give a choice a clear verb, attach a navigation link, and add an effect if it should change game state. The watchtower also shows a typed command.' },
     { mode: 'apprentice', selector: '[data-tour="playtest-action"]', eyebrow: 'Game tutorial · 4', title: 'Play every branch', body: 'Playtest from the beginning. Take each route, check scene text and game state, then revise confusing or broken paths.' },
     { mode: 'apprentice', selector: '[data-tour="project-download"]', eyebrow: 'Game tutorial · 5', title: 'Keep an editable copy', body: 'Download the project ZIP after authoring. This is the copy you can import later to continue writing.' },
     { mode: 'apprentice', selector: '[data-tour="game-export"]', eyebrow: 'Game tutorial · 6', title: 'Share a playable build', body: 'Export the game ZIP. Extract the whole archive and open index.html to check the reader experience before sharing.' },
@@ -53,7 +53,7 @@ const sageTutorial: readonly Step[] = [
 ];
 
 export function shouldOfferStudioTour(): boolean { return localStorage.getItem(STORAGE_KEY) === null; }
-export function shouldOfferModeTour(kind: Mode): boolean { return localStorage.getItem(`dungeon-scrivener-${kind}-tour-v1`) === null; }
+export function shouldOfferModeTour(kind: Mode): boolean { return kind !== 'apprentice' && localStorage.getItem(`dungeon-scrivener-${kind}-tour-v1`) === null; }
 
 export function StudioTour({ phase, kind, mode, onModeChange, onClose, onStart }: {
   phase: TourPhase; kind: TourKind; mode: Mode | 'home'; onModeChange: (mode: Mode) => void;
@@ -70,7 +70,7 @@ export function StudioTour({ phase, kind, mode, onModeChange, onClose, onStart }
   const step = tourSteps[stepIndex] ?? tourSteps[0]!;
 
   useEffect(() => {
-    if (phase === 'invite' && kind === 'studio' && !inviteRef.current?.open) inviteRef.current?.showModal();
+    if (phase === 'invite' && kind === 'studio' && !inviteRef.current?.open) inviteRef.current?.show();
     if ((phase !== 'invite' || kind !== 'studio') && inviteRef.current?.open) inviteRef.current.close();
   }, [phase, kind]);
   useEffect(() => {
@@ -85,10 +85,13 @@ export function StudioTour({ phase, kind, mode, onModeChange, onClose, onStart }
     const target = document.querySelector<HTMLElement>(step.selector);
     if (!target) { setTargetRect(null); return; }
     setTargetRect(null);
-    const update = () => setTargetRect({ selector: step.selector, rect: target.getBoundingClientRect() });
+    let positioned = false;
+    const update = () => { if (positioned) setTargetRect({ selector: step.selector, rect: target.getBoundingClientRect() }); };
     const timer = window.setTimeout(() => {
       const rect = target.getBoundingClientRect();
       if (rect.top < 84 || rect.bottom > window.innerHeight - 40) window.scrollBy({ top: rect.top - 110, behavior: 'instant' });
+      // Keep Next disabled until the initial scroll has placed the card.
+      positioned = true;
       update();
     }, 80);
     const observer = new ResizeObserver(update);

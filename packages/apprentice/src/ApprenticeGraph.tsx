@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Background, Controls, MarkerType, ReactFlow, type Connection, type Edge, type Node, type NodeChange, type ReactFlowInstance } from '@xyflow/react';
+import { Background, ControlButton, Controls, MarkerType, ReactFlow, type Connection, type Edge, type Node, type NodeChange, type ReactFlowInstance } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { WorldDocument } from '@dungeon-scrivener/model';
 import { createGraphHistory, dispatchGraphCommand, redoGraphEdit, undoGraphEdit, type GraphHistory } from './commands.js';
@@ -30,8 +30,10 @@ export function ApprenticeGraph({ world, positions = EMPTY_POSITIONS, onPosition
   const [activeNodeId, setActiveNodeId] = useState(selectedNodeId ?? '');
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
-  const lastEmittedWorld = useRef<string | null>(null);
-  const lastWorld = useRef(JSON.stringify(world));
+  const [nodeQuery, setNodeQuery] = useState('');
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId?: string; edgeId?: string } | null>(null);
+  const lastEmittedWorld = useRef<WorldDocument | null>(null);
+  const lastWorld = useRef(world);
   const graphElement = useRef<HTMLElement>(null);
   const flowInstance = useRef<ReactFlowInstance<Node, Edge> | null>(null);
   useEffect(() => {
@@ -39,30 +41,40 @@ export function ApprenticeGraph({ world, positions = EMPTY_POSITIONS, onPosition
     setNodePositions(positions);
   }, [positions]);
   useEffect(() => {
-    const nextWorld = JSON.stringify(world);
-    if (nextWorld === lastEmittedWorld.current) {
+    if (world === lastEmittedWorld.current) {
       lastEmittedWorld.current = null;
-      lastWorld.current = nextWorld;
+      lastWorld.current = world;
       return;
     }
-    if (nextWorld === lastWorld.current) return;
-    lastWorld.current = nextWorld;
+    if (world === lastWorld.current) return;
+    lastWorld.current = world;
     setHistory(createGraphHistory(world));
   }, [world]);
   const editableWorld = history.world;
   const graph = useMemo(() => projectGraph(editableWorld), [editableWorld]);
+  const matchingNodes = useMemo(() => nodeQuery.trim() ? graph.nodes.filter(node =>
+    `${nodeLabels?.[node.id] ?? node.title} ${node.id}`.toLocaleLowerCase().includes(nodeQuery.trim().toLocaleLowerCase())) : [], [graph.nodes, nodeLabels, nodeQuery]);
+  const focusNode = (id: string) => {
+    const index = graph.nodes.findIndex(node => node.id === id);
+    const point = positionsRef.current[id] ?? defaultPosition(index);
+    setActiveNodeId(id);
+    onSelectNode?.(id);
+    setNodeQuery('');
+    void flowInstance.current?.setCenter(point.x + 100, point.y + 40, { zoom: Math.max(flowInstance.current.getZoom(), 0.9), duration: 180 });
+  };
   const nodes: Node[] = graph.nodes.map((node, index) => ({
     id: node.id,
     position: nodePositions[node.id] ?? defaultPosition(index),
     ...(nodeMeasurements[node.id] ? { measured: nodeMeasurements[node.id] } : {}),
-    data: { label: <><span>{node.visitable ? 'Scene' : 'Folder'}: {nodeLabels?.[node.id] ?? node.title}</span>{node.id === (selectedNodeId ?? activeNodeId) && <strong className="apprentice-node-selected">Selected</strong>}</> },
+    data: { label: <><span>{node.visitable ? 'Scene' : 'Folder'}: {nodeLabels?.[node.id] ?? node.title}</span>{!node.visitable && <small className="apprentice-node-kind">Organizes scenes</small>}{node.id === (selectedNodeId ?? activeNodeId) && <strong className="apprentice-node-selected">Selected</strong>}</> },
     selected: node.id === (selectedNodeId ?? activeNodeId),
-    connectable: node.visitable,
-    style: { borderRadius: node.visitable ? 8 : 3, border: node.visitable ? '2px solid #365b78' : '2px dashed #777', padding: 12, minWidth: 178 },
+    connectable: true,
+    className: node.visitable ? 'apprentice-scene-node' : 'apprentice-folder-node',
+    style: { borderRadius: node.visitable ? 8 : 5, border: node.visitable ? '2px solid #365b78' : '2px dashed #a36b3f', padding: 12, minWidth: 178 },
   }));
   const edges: Edge[] = [
-    ...graph.containment.map((edge) => ({ id: edge.id, source: edge.parentId, target: edge.childId, label: 'contains', type: 'step', style: { stroke: '#8b8f91', strokeWidth: 2, strokeDasharray: '6 5' }, labelStyle: { fill: '#555' }, selectable: false })),
-    ...graph.navigation.map((edge) => ({ id: edge.id, source: edge.fromNodeId, target: edge.toNodeId, label: 'leads to', type: 'default', selected: edge.id === selectedEdgeId, markerEnd: { type: MarkerType.ArrowClosed, width: 28, height: 28, color: '#087b69' }, style: { stroke: '#087b69', strokeWidth: 3.5 }, labelStyle: { fill: '#075b50', fontWeight: 700 } })),
+    ...graph.containment.map((edge) => ({ id: edge.id, source: edge.parentId, target: edge.childId, label: 'contains', type: 'step', selected: edge.id === selectedEdgeId, style: { stroke: '#a36b3f', strokeWidth: 2.5, strokeDasharray: '6 5' }, labelStyle: { fill: '#7a4a2c', fontWeight: 700 } })),
+    ...graph.navigation.map((edge) => ({ id: edge.id, source: edge.fromNodeId, target: edge.toNodeId, label: 'leads to', type: 'default', selected: edge.id === selectedEdgeId, markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#087b69' }, style: { stroke: '#087b69', strokeWidth: 3.5 }, labelStyle: { fill: '#075b50', fontWeight: 700 } })),
   ];
 
   const updatePositions = (next: GraphPositions) => {
@@ -86,11 +98,28 @@ export function ApprenticeGraph({ world, positions = EMPTY_POSITIONS, onPosition
     for (const change of moved) if (change.position) next[change.id] = change.position;
     updatePositions(next);
   };
-  const canConnect = (connection: Connection | Edge) => connection.source !== connection.target
-    && graph.nodes.some(node => node.id === connection.source && node.visitable)
-    && graph.nodes.some(node => node.id === connection.target && node.visitable);
+  const canConnect = (connection: Connection | Edge) => {
+    if (connection.source === connection.target) return false;
+    const source = graph.nodes.find(node => node.id === connection.source);
+    const target = graph.nodes.find(node => node.id === connection.target);
+    if (!source || !target) return false;
+    if (source.visitable) return target.visitable;
+    let ancestorId: string | null = source.id;
+    while (ancestorId !== null) {
+      if (ancestorId === target.id) return false;
+      ancestorId = graph.nodes.find(node => node.id === ancestorId)?.parentId ?? null;
+    }
+    return true;
+  };
   const connect = (connection: Connection) => {
-    if (!canConnect(connection)) { setMessage('Connect the bottom dot of one scene to the top dot of another scene.'); return; }
+    if (!canConnect(connection)) { setMessage('Drag from a scene to another scene for a route, or from a folder to a scene or folder to organize it.'); return; }
+    const source = graph.nodes.find(node => node.id === connection.source);
+    if (source && !source.visitable) {
+      const target = graph.nodes.find(node => node.id === connection.target);
+      if (target?.parentId === source.id) { setMessage('That node is already in this folder.'); return; }
+      dispatch({ kind: 'reparent-node', nodeId: connection.target, parentId: source.id });
+      return;
+    }
     if (graph.navigation.some(edge => edge.fromNodeId === connection.source && edge.toNodeId === connection.target)) {
       setMessage('Those scenes already have a navigation link.');
       return;
@@ -101,22 +130,22 @@ export function ApprenticeGraph({ world, positions = EMPTY_POSITIONS, onPosition
   const dispatch = (command: Parameters<typeof dispatchGraphCommand>[1]) => {
     const outcome = dispatchGraphCommand(history, command);
     setHistory(outcome.history);
-    if (outcome.result.ok) { lastEmittedWorld.current = JSON.stringify(outcome.result.world); onWorldChange?.(outcome.result.world); }
+    if (outcome.result.ok) { lastEmittedWorld.current = outcome.result.world; onWorldChange?.(outcome.result.world); }
     setMessage(outcome.result.ok ? '' : outcome.result.message);
   };
   const undo = () => {
     const next = undoGraphEdit(history);
     setHistory(next);
-    if (next.world !== history.world) { lastEmittedWorld.current = JSON.stringify(next.world); onWorldChange?.(next.world); }
+    if (next.world !== history.world) { lastEmittedWorld.current = next.world; onWorldChange?.(next.world); }
   };
   const redo = () => {
     const next = redoGraphEdit(history);
     setHistory(next);
-    if (next.world !== history.world) { lastEmittedWorld.current = JSON.stringify(next.world); onWorldChange?.(next.world); }
+    if (next.world !== history.world) { lastEmittedWorld.current = next.world; onWorldChange?.(next.world); }
   };
-  const nodeIds = editableWorld.nodes.map((node) => node.id);
   const selectedNode = editableWorld.nodes.find((node) => node.id === activeNodeId);
   const createNode = (visitable: boolean) => {
+    setContextMenu(null);
     const id = newId(visitable ? 'scene' : 'folder');
     const selectedIndex = graph.nodes.findIndex(node => node.id === activeNodeId);
     const anchor = positionsRef.current[activeNodeId] ?? defaultPosition(Math.max(selectedIndex, 0));
@@ -135,7 +164,7 @@ export function ApprenticeGraph({ world, positions = EMPTY_POSITIONS, onPosition
       kind: 'add-node',
       node: {
         id,
-        parentId: null,
+        parentId: selectedNode && !selectedNode.visitable ? selectedNode.id : null,
         visitable,
         title: { kind: 'literal', text: visitable ? 'New scene' : 'New folder' },
         content: { kind: 'literal', text: '' },
@@ -144,17 +173,37 @@ export function ApprenticeGraph({ world, positions = EMPTY_POSITIONS, onPosition
     setActiveNodeId(id);
     onSelectNode?.(id);
   };
+  const removeSelectedNode = (nodeId: string) => {
+    dispatch({ kind: 'delete-node', nodeId });
+    setContextMenu(null);
+  };
+  const removeSelectedLink = (edgeId: string) => {
+    const containment = graph.containment.find(edge => edge.id === edgeId);
+    if (containment) dispatch({ kind: 'reparent-node', nodeId: containment.childId, parentId: null });
+    else dispatch({ kind: 'remove-link', edgeId });
+    setSelectedEdgeId(null);
+    setContextMenu(null);
+  };
+  const openContextMenu = (event: React.MouseEvent, target: { nodeId?: string; edgeId?: string }) => {
+    event.preventDefault();
+    const rect = graphElement.current?.getBoundingClientRect();
+    if (!rect) return;
+    setContextMenu({ x: Math.max(8, Math.min(event.clientX - rect.left, rect.width - 210)), y: Math.max(8, Math.min(event.clientY - rect.top, rect.height - 190)), ...target });
+  };
 
   return (
     <section ref={graphElement} aria-label="Apprentice node graph" style={{ width: '100%', height: '100%', minHeight: 420 }}>
       <div data-tour="graph-toolbar" role="toolbar" aria-label="Graph editing" className="apprentice-graph-toolbar">
-        <div className="apprentice-graph-toolbar__group"><button type="button" onClick={() => createNode(true)}>Add scene</button><button type="button" onClick={() => createNode(false)}>Add folder</button></div>
-        <div className="apprentice-graph-toolbar__group"><button type="button" disabled={!history.past.length} onClick={undo}>Undo</button><button type="button" disabled={!history.future.length} onClick={redo}>Redo</button></div>
+        <button type="button" className="button-primary" onClick={() => createNode(true)}><span aria-hidden="true">＋</span> Add scene</button>
+        <div className="apprentice-map-search"><input type="search" aria-label="Find scene or folder" value={nodeQuery} onChange={event => setNodeQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && matchingNodes[0]) focusNode(matchingNodes[0].id); }} placeholder="Find scene or folder" />
+          {nodeQuery.trim() && <div className="apprentice-map-search__results" aria-label="Map search results">{matchingNodes.slice(0, 30).map(node => <button key={node.id} type="button" onClick={() => focusNode(node.id)}>{nodeLabels?.[node.id] ?? node.title}</button>)}{matchingNodes.length > 30 && <span>Showing 30 of {matchingNodes.length}. Refine your search.</span>}{!matchingNodes.length && <span>No matching nodes.</span>}</div>}</div>
+        <details className="apprentice-graph-tools"><summary>Map tools</summary><div className="apprentice-graph-tools__panel">
+        <div className="apprentice-graph-toolbar__group"><button type="button" onClick={() => createNode(false)}>Add folder</button><button type="button" disabled={!history.past.length} onClick={undo}>Undo</button><button type="button" disabled={!history.future.length} onClick={redo}>Redo</button></div>
         <label>
-          <span>Move selected node under</span>
+          <span>{selectedNode?.visitable ? 'Put scene in folder' : 'Put folder in folder'}</span>
           <select aria-label="Containment parent" value={selectedNode?.parentId ?? ''} disabled={!selectedNode} onChange={(event) => dispatch({ kind: 'reparent-node', nodeId: activeNodeId, parentId: event.target.value || null })}>
-            <option value="">No parent</option>
-            {nodeIds.filter((id) => id !== activeNodeId).map((id) => <option key={id} value={id}>{nodeLabels?.[id] ?? graph.nodes.find((node) => node.id === id)?.title ?? id}</option>)}
+            <option value="">Top level</option>
+            {graph.nodes.filter(node => !node.visitable && node.id !== activeNodeId).map(node => <option key={node.id} value={node.id}>{nodeLabels?.[node.id] ?? node.title}</option>)}
           </select>
         </label>
         <label>
@@ -167,23 +216,27 @@ export function ApprenticeGraph({ world, positions = EMPTY_POSITIONS, onPosition
             {graph.nodes.filter((node) => node.visitable && node.id !== activeNodeId).map((node) => <option key={node.id} value={node.id}>{nodeLabels?.[node.id] ?? node.title}</option>)}
           </select>
         </label>
-        <button type="button" disabled={!selectedNode || activeNodeId === editableWorld.entryNodeId} onClick={() => dispatch({ kind: 'delete-node', nodeId: activeNodeId })}>Delete selected</button>
-        <button type="button" disabled={!selectedEdgeId} onClick={() => { if (selectedEdgeId) dispatch({ kind: 'remove-link', edgeId: selectedEdgeId }); setSelectedEdgeId(null); }}>Remove selected link</button>
+        <div className="apprentice-graph-toolbar__group"><button type="button" disabled={!selectedNode || activeNodeId === editableWorld.entryNodeId} onClick={() => removeSelectedNode(activeNodeId)}>Delete selected</button>
+        <button type="button" disabled={!selectedEdgeId} onClick={() => { if (selectedEdgeId) removeSelectedLink(selectedEdgeId); }}>{graph.containment.some(edge => edge.id === selectedEdgeId) ? 'Remove from folder' : 'Remove selected link'}</button></div>
+        </div></details>
       </div>
       {message && <p className="apprentice-graph-message" role="alert">{message}</p>}
-      <div aria-label="Relationship legend" className="apprentice-graph-legend">
-        <span>Drag a scene to arrange the map. Drag its bottom dot to another scene’s top dot to link them.</span>
-        <span>Teal arrow: authored route. Assign it to a scene action in the inspector. Click an arrow to select it for removal.</span>
-        <span>Dashed grey line: folder containment.</span>
-      </div>
-      <ReactFlow nodes={nodes} edges={edges} fitView onInit={instance => { flowInstance.current = instance; }} onNodesChange={onNodesChange}
+      <div aria-label="Relationship legend" className="apprentice-graph-legend">Drag boxes to arrange. Drag from a lower dot to an upper dot. <span>Scene → scene: player route</span><span>Folder → scene or folder: contains it</span></div>
+      <ReactFlow nodes={nodes} edges={edges} onlyRenderVisibleElements fitView={window.innerWidth >= 600} defaultViewport={{ x: 140, y: 80, zoom: 0.6 }} onInit={instance => { flowInstance.current = instance; }} onNodesChange={onNodesChange}
         onNodeDragStop={(_event, node) => { const next = { ...positionsRef.current, [node.id]: node.position }; updatePositions(next); onPositionsChange?.(next); }}
         isValidConnection={canConnect} onConnect={connect}
-        onNodeClick={(_event, node) => { setActiveNodeId(node.id); setSelectedEdgeId(null); onSelectNode?.(node.id); }}
-        onEdgeClick={(_event, edge) => { if (edge.label === 'leads to') setSelectedEdgeId(edge.id); }}>
+        onNodeClick={(_event, node) => { setContextMenu(null); setActiveNodeId(node.id); setSelectedEdgeId(null); onSelectNode?.(node.id); }}
+        onNodeContextMenu={(event, node) => { setActiveNodeId(node.id); setSelectedEdgeId(null); onSelectNode?.(node.id); openContextMenu(event, { nodeId: node.id }); }}
+        onEdgeClick={(_event, edge) => { setContextMenu(null); setSelectedEdgeId(edge.id); }}
+        onEdgeContextMenu={(event, edge) => { setSelectedEdgeId(edge.id); openContextMenu(event, { edgeId: edge.id }); }}
+        onPaneClick={() => setContextMenu(null)}>
         <Background />
-        <Controls />
+        <Controls showFitView={false}><ControlButton onClick={() => void flowInstance.current?.fitView({ padding: 0.2, duration: 0 })} title="Fit all scenes in view" aria-label="Fit all scenes in view"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="5" cy="6" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7 6h9M6 8l5 8m6-7-4 7"/></svg></ControlButton></Controls>
       </ReactFlow>
+      {contextMenu && <div className="apprentice-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onKeyDown={event => { if (event.key === 'Escape') setContextMenu(null); }}>
+        {contextMenu.nodeId && <><p>{nodeLabels?.[contextMenu.nodeId] ?? 'Selected node'}</p><button type="button" role="menuitem" onClick={() => createNode(true)}>Add scene nearby</button><button type="button" role="menuitem" disabled={contextMenu.nodeId === editableWorld.entryNodeId} onClick={() => removeSelectedNode(contextMenu.nodeId!)}>Delete node</button></>}
+        {contextMenu.edgeId && <button type="button" role="menuitem" onClick={() => removeSelectedLink(contextMenu.edgeId!)}>{graph.containment.some(edge => edge.id === contextMenu.edgeId) ? 'Remove from folder' : 'Remove navigation link'}</button>}
+      </div>}
     </section>
   );
 }

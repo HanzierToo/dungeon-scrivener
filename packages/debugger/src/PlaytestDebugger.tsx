@@ -188,6 +188,8 @@ export function PlaytestDebugger({
   const [selectedCheckpointId, setSelectedCheckpointId] = useState('');
   const [nextCheckpointId, setNextCheckpointId] = useState(1);
   const [selectedFieldId, setSelectedFieldId] = useState('');
+  const [fieldQuery, setFieldQuery] = useState('');
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [draftFieldId, setDraftFieldId] = useState('');
   const [editMessage, setEditMessage] = useState('');
@@ -195,6 +197,7 @@ export function PlaytestDebugger({
   const [command, setCommand] = useState('');
   const fields = useMemo(() => buildEditableFields(world), [world]);
   const selectedField = fields.find((field) => field.id === selectedFieldId) ?? fields[0];
+  const visibleFields = fields.filter(field => !fieldQuery.trim() || field.label.toLowerCase().includes(fieldQuery.trim().toLowerCase()) || field.id.toLowerCase().includes(fieldQuery.trim().toLowerCase()));
   const value = selectedField ? currentValue(snapshot, selectedField.reference) : undefined;
 
   function appendTransition(records: readonly TransitionTraceRecord[]): void {
@@ -229,7 +232,7 @@ export function PlaytestDebugger({
     const checkpoint: Checkpoint = {
       id: nextCheckpointId,
       snapshot: copySnapshot(snapshot),
-      transitions: structuredClone(transitions),
+      transitions,
     };
     setCheckpoints((previous) => [...previous, checkpoint]);
     setSelectedCheckpointId(String(checkpoint.id));
@@ -241,7 +244,7 @@ export function PlaytestDebugger({
     if (!checkpoint) return;
     setSnapshot(copySnapshot(checkpoint.snapshot));
     setDraftFieldId('');
-    setTransitions(structuredClone(checkpoint.transitions));
+    setTransitions(checkpoint.transitions);
     setEditMessage(`Restored checkpoint ${checkpoint.id}.`);
     setStepMessage('');
   }
@@ -323,6 +326,7 @@ export function PlaytestDebugger({
         <p>Changes go through the engine’s validated <code>set-state</code> effect and remain in this isolated test session.</p>
         {selectedField && value !== undefined ? (
           <form onSubmit={editState} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            {fields.length > 15 && <label>Find state field<input type="search" value={fieldQuery} onChange={event => setFieldQuery(event.currentTarget.value)} /></label>}
             <label>
               State field
               <select value={selectedField.id} onChange={(event) => {
@@ -330,7 +334,8 @@ export function PlaytestDebugger({
                 const field = fields.find((candidate) => candidate.id === event.currentTarget.value);
                 if (field) setDraft(scalarText(currentValue(snapshot, field.reference) ?? ''));
               }}>
-                {fields.map((field) => <option key={field.id} value={field.id}>{field.label} · {valueTypeLabel(field.valueType)}</option>)}
+                {visibleFields.some(field => field.id === selectedField.id) ? null : <option value={selectedField.id}>{selectedField.label} · {valueTypeLabel(selectedField.valueType)}</option>}
+                {visibleFields.map((field) => <option key={field.id} value={field.id}>{field.label} · {valueTypeLabel(field.valueType)}</option>)}
               </select>
             </label>
             <label>
@@ -343,9 +348,9 @@ export function PlaytestDebugger({
         {editMessage && <p role="status">{editMessage}</p>}
       </fieldset></details>
       <p>Current test state: node <code>{snapshot.currentNodeId}</code>, game time {snapshot.gameTimeMilliseconds} ms.</p>
-      <details>
+      <details open={snapshotOpen} onToggle={event => setSnapshotOpen(event.currentTarget.open)}>
         <summary>Inspect complete test-session snapshot</summary>
-        <pre style={{ maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(snapshot, null, 2)}</pre>
+        {snapshotOpen && <pre style={{ maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(snapshot, null, 2)}</pre>}
       </details>
       <DebuggerPanel
         world={world}

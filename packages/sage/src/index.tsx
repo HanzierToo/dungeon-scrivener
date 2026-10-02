@@ -10,7 +10,7 @@ import { lua } from '@codemirror/legacy-modes/mode/lua';
 import { parse as parseLuaSyntax } from 'luaparse';
 import type { Diagnostic, ProjectFile, ProjectVfsSnapshot } from '@dungeon-scrivener/model';
 import { parseJsonDocument, validateLocaleDocument, validateProjectManifest, validateWorldDocument } from '@dungeon-scrivener/model';
-import { addProjectDirectory, addProjectFile, deleteProjectPath, readProjectFile, renameProjectPath, writeProjectZip } from '@dungeon-scrivener/vfs';
+import { addProjectDirectory, addProjectFile, deleteProjectPath, renameProjectPath, replaceProjectFile, writeProjectZip } from '@dungeon-scrivener/vfs';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -30,19 +30,29 @@ export interface SageWorkspaceState {
   readonly dirtyPaths: ReadonlySet<string>;
 }
 
-function parseView(snapshot: ProjectVfsSnapshot): { view?: SageProjectView; diagnostics: Diagnostic[] } {
+type ParsedFile = { file: ProjectFile; value?: unknown; diagnostics: Diagnostic[] };
+
+function parseView(snapshot: ProjectVfsSnapshot, cache: Map<string, ParsedFile>): { view?: SageProjectView; diagnostics: Diagnostic[] } {
   const diagnostics: Diagnostic[] = [];
   const decoded = new Map<string, unknown>();
+  for (const path of cache.keys()) if (!snapshot.files.has(path)) cache.delete(path);
   for (const path of ['project.json', 'world.json', ...[...snapshot.files.keys()].filter(item => /^locales\/[^/]+\.json$/u.test(item))]) {
-    const file = readProjectFile(snapshot, path);
+    const file = snapshot.files.get(path);
     if (!file) continue;
-    const parsed = parseJsonDocument(file.bytes, path);
+    let parsed = cache.get(path);
+    if (parsed?.file !== file) {
+      const result = parseJsonDocument(file.bytes, path);
+      const fileDiagnostics = [...result.diagnostics];
+      if (result.ok) {
+        if (path === 'project.json') fileDiagnostics.push(...validateProjectManifest(result.value, path).diagnostics);
+        else if (path === 'world.json') fileDiagnostics.push(...validateWorldDocument(result.value, path).diagnostics);
+        else fileDiagnostics.push(...validateLocaleDocument(result.value, path).diagnostics);
+      }
+      parsed = { file, ...(result.ok ? { value: result.value } : {}), diagnostics: fileDiagnostics };
+      cache.set(path, parsed);
+    }
     diagnostics.push(...parsed.diagnostics);
-    if (!parsed.ok) continue;
-    decoded.set(path, parsed.value);
-    if (path === 'project.json') diagnostics.push(...validateProjectManifest(parsed.value, path).diagnostics);
-    else if (path === 'world.json') diagnostics.push(...validateWorldDocument(parsed.value, path).diagnostics);
-    else diagnostics.push(...validateLocaleDocument(parsed.value, path).diagnostics);
+    if (parsed.value !== undefined) decoded.set(path, parsed.value);
   }
   if (diagnostics.some(item => item.severity === 'error' || item.severity === 'fatal')) return { diagnostics };
   const locales: Record<string, unknown> = {};
@@ -65,10 +75,11 @@ export class SageWorkspace {
   private dirty = new Set<string>();
   private active: string | undefined;
   private openPaths: string[] = [];
+  private parsedCache = new Map<string, ParsedFile>();
 
   constructor(snapshot: ProjectVfsSnapshot) {
     this.current = snapshot;
-    const parsed = parseView(snapshot);
+    const parsed = parseView(snapshot, this.parsedCache);
     this.lastValid = parsed.view;
     this.diagnostics = parsed.diagnostics;
   }
@@ -84,7 +95,7 @@ export class SageWorkspace {
   }
 
   open(path: string): SageWorkspaceState {
-    if (!readProjectFile(this.current, path) && !this.current.directories.has(path)) throw new Error(`No file or directory at ${path}.`);
+    if (!this.current.files.has(path) && !this.current.directories.has(path)) throw new Error(`No file or directory at ${path}.`);
     this.active = path;
     if (!this.current.directories.has(path) && !this.openPaths.includes(path)) this.openPaths.push(path);
     return this.getState();
@@ -132,10 +143,9 @@ export class SageWorkspace {
   }
 
   editText(path: string, text: string): SageWorkspaceState {
-    const file = readProjectFile(this.current, path);
+    const file = this.current.files.get(path);
     if (!file) throw new Error(`No file at ${path}.`);
-    const replacement: ProjectFile = { path: file.path, bytes: encoder.encode(text), role: file.role, ...(file.mediaType === undefined ? {} : { mediaType: file.mediaType }) };
-    this.current = addProjectFile(deleteProjectPath(this.current, path), replacement);
+    this.current = replaceProjectFile(this.current, path, encoder.encode(text));
     this.scriptDiagnostics.delete(path);
     this.dirty.add(path);
     return this.afterEdit();
@@ -156,7 +166,7 @@ export class SageWorkspace {
   }
 
   private afterEdit(): SageWorkspaceState {
-    const parsed = parseView(this.current);
+    const parsed = parseView(this.current, this.parsedCache);
     this.diagnostics = [...parsed.diagnostics, ...[...this.scriptDiagnostics.values()].flat()];
     if (parsed.view !== undefined) this.lastValid = parsed.view;
     return this.getState();
@@ -233,6 +243,8 @@ export interface SageModeProps {
   readonly showExport?: boolean;
 }
 
+type SearchHit = { path: string; line: number; preview: string };
+
 /** File-tree IDE view. File bytes remain in the VFS while tabs are switched. */
 export function SageMode({ workspace, onStateChange, showExport = true }: SageModeProps): React.ReactElement {
   const [state, setState] = useState(workspace.getState());
@@ -240,11 +252,24 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
   const [pathInput, setPathInput] = useState('');
   const [view, setView] = useState<'tree' | 'flat'>(() => localStorage.getItem('ds-sage-view') === 'flat' ? 'flat' : 'tree');
   const [sort, setSort] = useState<'name' | 'type'>(() => localStorage.getItem('ds-sage-sort') === 'type' ? 'type' : 'name');
+  const [fileQuery, setFileQuery] = useState('');
+  const [filePage, setFilePage] = useState(0);
+  const [contentQuery, setContentQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const [resultPage, setResultPage] = useState(0);
+  const [diagnosticQuery, setDiagnosticQuery] = useState('');
+  const [diagnosticPage, setDiagnosticPage] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['locales', 'scripts', 'assets', 'styles']));
   const [context, setContext] = useState<{ path: string; x: number; y: number }>();
   const editorHost = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | undefined>(undefined);
-  const currentFile = useMemo(() => state.activePath ? readProjectFile(state.snapshot, state.activePath) : undefined, [state]);
+  const editorStates = useRef(new Map<string, EditorView['state']>());
+  const quickOpenInput = useRef<HTMLInputElement>(null);
+  const searchWorker = useRef<Worker | null>(null);
+  const pendingJump = useRef<{ path: string; line: number } | null>(null);
+  const currentFile = useMemo(() => state.activePath ? state.snapshot.files.get(state.activePath) : undefined, [state]);
   const textFile = currentFile !== undefined && isText(currentFile.bytes);
 
   const update = (next: SageWorkspaceState) => {
@@ -256,20 +281,40 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
     if (!editorHost.current || !currentFile || !textFile) return undefined;
     const value = decoder.decode(currentFile.bytes);
     const view = new EditorView({
-      doc: value,
-      extensions: [basicSetup, keymap.of([indentWithTab]), ...editorExtensions(currentFile.path), EditorView.updateListener.of(update => {
+      ...(editorStates.current.has(currentFile.path) ? { state: editorStates.current.get(currentFile.path)! } : { doc: value }),
+      ...(!editorStates.current.has(currentFile.path) ? { extensions: [basicSetup, keymap.of([indentWithTab]), ...editorExtensions(currentFile.path), EditorView.updateListener.of(update => {
         if (update.docChanged) {
           const source = update.state.doc.toString();
           workspace.editText(currentFile.path, source);
           const scriptDiagnostics = diagnoseSageScript(source, currentFile.path, update.view);
           updateState(workspace.setScriptDiagnostics(currentFile.path, scriptDiagnostics));
         }
-      })],
+      })] } : {}),
       parent: editorHost.current
     });
     editor.current = view;
-    return () => { view.destroy(); editor.current = undefined; };
+    if (pendingJump.current?.path === currentFile.path) {
+      const line = view.state.doc.line(Math.min(pendingJump.current.line, view.state.doc.lines));
+      view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'center' }) });
+      view.focus();
+      pendingJump.current = null;
+    }
+    return () => { editorStates.current.set(currentFile.path, view.state); view.destroy(); editor.current = undefined; };
   }, [workspace, currentFile?.path, textFile]);
+
+  useEffect(() => {
+    const quickOpen = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        quickOpenInput.current?.focus();
+        quickOpenInput.current?.select();
+      }
+    };
+    window.addEventListener('keydown', quickOpen);
+    return () => window.removeEventListener('keydown', quickOpen);
+  }, []);
+
+  useEffect(() => () => searchWorker.current?.terminate(), []);
 
   const updateState = (next: SageWorkspaceState) => {
     setState(next);
@@ -284,28 +329,85 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
     return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', dismiss); };
   }, [context]);
 
-  const files = [...state.snapshot.files.keys()];
-  const directories = new Set(state.snapshot.directories);
-  for (const path of files) {
-    const parts = path.split('/');
-    for (let index = 1; index < parts.length; index += 1) directories.add(parts.slice(0, index).join('/'));
-  }
-  const paths = [...directories, ...files];
-  const compare = (a: string, b: string) => {
-    if (sort === 'type') {
-      const aDirectory = directories.has(a);
-      const bDirectory = directories.has(b);
-      if (aDirectory !== bDirectory) return aDirectory ? -1 : 1;
-      const aExtension = a.split('.').at(-1) ?? '';
-      const bExtension = b.split('.').at(-1) ?? '';
-      if (!aDirectory && aExtension !== bExtension) return aExtension.localeCompare(bExtension);
+  const explorer = useMemo(() => {
+    const files = [...state.snapshot.files.keys()];
+    const directories = new Set(state.snapshot.directories);
+    for (const path of files) {
+      const parts = path.split('/');
+      for (let index = 1; index < parts.length; index += 1) directories.add(parts.slice(0, index).join('/'));
     }
-    return a.split('/').at(-1)!.localeCompare(b.split('/').at(-1)!);
-  };
+    const compare = (a: string, b: string) => {
+      if (sort === 'type') {
+        const aDirectory = directories.has(a);
+        const bDirectory = directories.has(b);
+        if (aDirectory !== bDirectory) return aDirectory ? -1 : 1;
+        const aExtension = a.split('.').at(-1) ?? '';
+        const bExtension = b.split('.').at(-1) ?? '';
+        if (!aDirectory && aExtension !== bExtension) return aExtension.localeCompare(bExtension);
+      }
+      return (a.split('/').at(-1) ?? '').localeCompare(b.split('/').at(-1) ?? '');
+    };
+    const children = new Map<string, string[]>();
+    for (const path of [...directories, ...files]) {
+      const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+      const siblings = children.get(parent) ?? [];
+      siblings.push(path);
+      children.set(parent, siblings);
+    }
+    for (const siblings of children.values()) siblings.sort(compare);
+    return { files, directories, children, flatPaths: [...directories, ...files].sort(compare) };
+  }, [state.snapshot, sort]);
+  const { files, directories } = explorer;
+  const fileMatches = useMemo(() => fileQuery.trim()
+    ? files.filter(path => path.toLocaleLowerCase().includes(fileQuery.trim().toLocaleLowerCase())).sort((a, b) => a.localeCompare(b))
+    : [], [files, fileQuery]);
+  const filteredDiagnostics = useMemo(() => state.diagnostics.filter(item =>
+    `${item.severity} ${item.code} ${item.path ?? ''} ${item.message}`.toLocaleLowerCase().includes(diagnosticQuery.trim().toLocaleLowerCase())), [state.diagnostics, diagnosticQuery]);
   const open = (path: string) => {
     if (directories.has(path)) { setExpanded(current => { const next = new Set(current); if (next.has(path)) next.delete(path); else next.add(path); return next; }); return; }
     update(workspace.open(path));
     setTabs([...workspace.getOpenPaths()]);
+  };
+  const jumpTo = (path: string, line: number) => {
+    pendingJump.current = { path, line };
+    if (state.activePath === path && editor.current) {
+      const position = editor.current.state.doc.line(Math.min(line, editor.current.state.doc.lines)).from;
+      editor.current.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: 'center' }) });
+      editor.current.focus();
+      pendingJump.current = null;
+    } else open(path);
+  };
+  const searchContent = () => {
+    searchWorker.current?.terminate();
+    const query = contentQuery.trim();
+    setSearchResults([]);
+    setResultPage(0);
+    setSearchTruncated(false);
+    if (!query) { setSearching(false); return; }
+    const worker = new Worker(new URL('./search-worker.ts', import.meta.url), { type: 'module' });
+    searchWorker.current = worker;
+    const sourceFiles = [...state.snapshot.files.values()];
+    let index = 0;
+    let total = 0;
+    let truncated = false;
+    const next = () => {
+      const file = sourceFiles[index++];
+      if (!file) { setSearching(false); setSearchTruncated(truncated); worker.terminate(); if (searchWorker.current === worker) searchWorker.current = null; return; }
+      worker.postMessage({ path: file.path, bytes: file.bytes, query });
+    };
+    worker.onmessage = (event: MessageEvent<{ hits: SearchHit[]; more: boolean }>) => {
+      if (searchWorker.current !== worker) return;
+      const remaining = 1000 - total;
+      const accepted = event.data.hits.slice(0, remaining);
+      total += accepted.length;
+      if (accepted.length) setSearchResults(previous => [...previous, ...accepted]);
+      truncated ||= event.data.more || accepted.length < event.data.hits.length;
+      if (total >= 1000) { truncated = true; setSearching(false); setSearchTruncated(true); worker.terminate(); searchWorker.current = null; }
+      else next();
+    };
+    worker.onerror = () => { setSearching(false); worker.terminate(); if (searchWorker.current === worker) searchWorker.current = null; };
+    setSearching(true);
+    next();
   };
   const closeTab = (path: string) => {
     update(workspace.closeTab(path));
@@ -326,6 +428,7 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
     if (target && target !== path) {
       try {
         const next = workspace.rename(path, target);
+        for (const storedPath of [...editorStates.current.keys()]) if (storedPath === path || storedPath.startsWith(`${path}/`)) editorStates.current.delete(storedPath);
         setTabs([...workspace.getOpenPaths()]);
         update(next);
       }
@@ -335,6 +438,7 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
   const remove = (path: string) => {
     if (!window.confirm(`Delete ${path}${state.snapshot.files.has(path) ? '?' : ' and its contents? '}`)) return;
     const next = workspace.delete(path);
+    for (const storedPath of [...editorStates.current.keys()]) if (storedPath === path || storedPath.startsWith(`${path}/`)) editorStates.current.delete(storedPath);
     setTabs([...workspace.getOpenPaths()]);
     update(next);
   };
@@ -344,7 +448,7 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
   };
   const renderEntry = (path: string, depth: number): React.ReactNode => {
     const isDirectory = directories.has(path);
-    const children = paths.filter(candidate => candidate !== path && candidate.startsWith(path ? `${path}/` : '') && candidate.slice(path ? path.length + 1 : 0).indexOf('/') === -1).sort(compare);
+    const children = explorer.children.get(path) ?? [];
     return <li key={path}>
       <div className={`sage-entry${state.activePath === path ? ' is-active' : ''}`} style={{ paddingLeft: `${.45 + depth * .85}rem` }} onContextMenu={event => { event.preventDefault(); showContext(path, event.clientX, event.clientY); }}>
         <button type="button" className="sage-entry__name" aria-expanded={isDirectory ? expanded.has(path) : undefined} onClick={() => open(path)} onKeyDown={event => { if (event.key === 'F10' && event.shiftKey) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); showContext(path, rect.left, rect.bottom); } }} title={path}>
@@ -355,13 +459,28 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
       {isDirectory && expanded.has(path) && view === 'tree' && <ul>{children.map(child => renderEntry(child, depth + 1))}</ul>}
     </li>;
   };
-  const visiblePaths = view === 'flat' ? paths.sort(compare) : paths.filter(path => !path.includes('/')).sort(compare);
+  const visiblePaths = view === 'flat' ? explorer.flatPaths : explorer.children.get('') ?? [];
 
   return <section className="sage-mode" aria-label="Sage Mode file editor">
     <aside className="sage-file-tree" aria-label="Project files">
       <div className="sage-explorer-heading"><h2>Explorer</h2><span>{files.length} files</span></div>
       <div className="sage-explorer-settings"><label>View<select aria-label="Explorer view" value={view} onChange={event => { const next = event.currentTarget.value as 'tree' | 'flat'; setView(next); localStorage.setItem('ds-sage-view', next); }}><option value="tree">Folders</option><option value="flat">Flat paths</option></select></label><label>Sort<select aria-label="Explorer sort" value={sort} onChange={event => { const next = event.currentTarget.value as 'name' | 'type'; setSort(next); localStorage.setItem('ds-sage-sort', next); }}><option value="name">Name</option><option value="type">Type</option></select></label></div>
-      <ul className="sage-explorer-list">{visiblePaths.map(path => renderEntry(path, 0))}</ul>
+      <label className="sage-quick-open">Quick open <kbd>⌘/Ctrl P</kbd><input ref={quickOpenInput} type="search" aria-label="Quick open file" value={fileQuery} onChange={event => { setFileQuery(event.target.value); setFilePage(0); }} onKeyDown={event => {
+        if (event.key === 'Escape') setFileQuery('');
+        if (event.key === 'Enter' && fileMatches[0]) { open(fileMatches[0]); setFileQuery(''); }
+      }} placeholder="Find a file by path" /></label>
+      {fileQuery.trim() ? <div className="sage-explorer-list sage-quick-results" aria-label="Matching files">
+        {fileMatches.slice(filePage * 60, (filePage + 1) * 60).map(path => <button key={path} type="button" onClick={() => { open(path); setFileQuery(''); }}>{path}</button>)}
+        {!fileMatches.length && <p>No matching files.</p>}
+        {fileMatches.length > 60 && <div className="sage-quick-results__pages"><button type="button" disabled={filePage === 0} onClick={() => setFilePage(page => page - 1)}>Previous</button><span>{filePage * 60 + 1}–{Math.min((filePage + 1) * 60, fileMatches.length)} of {fileMatches.length}</span><button type="button" disabled={(filePage + 1) * 60 >= fileMatches.length} onClick={() => setFilePage(page => page + 1)}>Next</button></div>}
+      </div> : <ul className="sage-explorer-list">{visiblePaths.map(path => renderEntry(path, 0))}</ul>}
+      <details className="sage-content-search"><summary>Search project text</summary>
+        <form onSubmit={event => { event.preventDefault(); searchContent(); }}><input type="search" aria-label="Project text query" value={contentQuery} onChange={event => setContentQuery(event.target.value)} placeholder="Words or IDs" /><button type="submit" disabled={!contentQuery.trim()}>Search</button></form>
+        {searching && <p role="status">Searching project files…</p>}
+        {!searching && searchTruncated && <p>Showing the first 1,000 matches or first 50 from a file. Narrow the query for more.</p>}
+        <div className="sage-content-search__results" aria-label="Project text results">{searchResults.slice(resultPage * 50, (resultPage + 1) * 50).map((hit, index) => <button key={`${hit.path}:${hit.line}:${index}`} type="button" onClick={() => jumpTo(hit.path, hit.line)}><strong>{hit.path}:{hit.line}</strong><span>{hit.preview}</span></button>)}</div>
+        {searchResults.length > 50 && <div className="sage-quick-results__pages"><button type="button" disabled={resultPage === 0} onClick={() => setResultPage(page => page - 1)}>Previous</button><span>{resultPage * 50 + 1}–{Math.min((resultPage + 1) * 50, searchResults.length)} of {searchResults.length}</span><button type="button" disabled={(resultPage + 1) * 50 >= searchResults.length} onClick={() => setResultPage(page => page + 1)}>Next</button></div>}
+      </details>
       <div className="sage-explorer-create"><label>New path<input value={pathInput} onChange={event => setPathInput(event.currentTarget.value)} placeholder="folder/file.json" /></label><div><button type="button" onClick={() => create(false)}>New file</button><button type="button" onClick={() => create(true)}>New folder</button></div></div>
       {showExport ? <button type="button" onClick={() => { void workspace.exportZip().then(bytes => {
         const zipBytes = new Uint8Array(bytes);
@@ -376,7 +495,11 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
         ? <div className="sage-code-editor" ref={editorHost} aria-label={`Editor for ${currentFile.path}`} />
         : <section className="sage-binary-preview" aria-label={`Binary preview for ${currentFile.path}`}><p>{currentFile.bytes.byteLength} bytes</p><pre>{Array.from(currentFile.bytes.slice(0, 256), (byte: number) => byte.toString(16).padStart(2, '0')).join(' ')}</pre>{currentFile.bytes.byteLength > 256 && <p>Preview limited to the first 256 bytes.</p>}</section>
         : <div className="sage-empty-editor"><span aria-hidden="true">✦</span><p>Open a file from Explorer to begin editing.</p></div>}
-      <section className="sage-diagnostics" aria-live="polite"><h2>Diagnostics</h2>{state.diagnostics.length === 0 ? <p>No diagnostics.</p> : <ul>{state.diagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}:${diagnostic.path ?? ''}:${index}`}>{diagnostic.severity.toUpperCase()} {diagnostic.path ?? ''}: {diagnostic.message}</li>)}</ul>}</section>
+      <section className="sage-diagnostics" aria-live="polite"><h2>Diagnostics · {state.diagnostics.length}</h2>
+        {state.diagnostics.length > 10 && <input type="search" aria-label="Filter diagnostics" value={diagnosticQuery} onChange={event => { setDiagnosticQuery(event.target.value); setDiagnosticPage(0); }} placeholder="Filter by file, code, or message" />}
+        {state.diagnostics.length === 0 ? <p>No diagnostics.</p> : <ul>{filteredDiagnostics.slice(diagnosticPage * 50, (diagnosticPage + 1) * 50).map((diagnostic, index) => <li key={`${diagnostic.code}:${diagnostic.path ?? ''}:${index}`}>{diagnostic.path && state.snapshot.files.has(diagnostic.path) ? <button type="button" onClick={() => jumpTo(diagnostic.path!, diagnostic.sourceSpan?.startLine ?? 1)}>{diagnostic.severity.toUpperCase()} {diagnostic.path}</button> : `${diagnostic.severity.toUpperCase()} ${diagnostic.path ?? ''}`} : {diagnostic.message}</li>)}</ul>}
+        {filteredDiagnostics.length > 50 && <div className="sage-quick-results__pages"><button type="button" disabled={diagnosticPage === 0} onClick={() => setDiagnosticPage(page => page - 1)}>Previous</button><span>{diagnosticPage * 50 + 1}–{Math.min((diagnosticPage + 1) * 50, filteredDiagnostics.length)} of {filteredDiagnostics.length}</span><button type="button" disabled={(diagnosticPage + 1) * 50 >= filteredDiagnostics.length} onClick={() => setDiagnosticPage(page => page + 1)}>Next</button></div>}
+      </section>
     </main>
   </section>;
 }

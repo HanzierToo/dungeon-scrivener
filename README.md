@@ -18,9 +18,9 @@ Open the local URL printed by Vite, normally `http://127.0.0.1:5173`. The dev co
 
 ## Make a first game
 
-1. Select **Create project**, enter a title and a semantic game version such as `1.0.0`, and open the starter story. You can also **Import project ZIP** to resume an existing authoring project.
-   On your first new project in this browser, choose **Start tour** for a short guided look around the Studio, or **Not now** to go straight to work. The tour asks whether you prefer the visual Apprentice map or the file-based Sage editor. After the Studio tour, an optional **Game tutorial** teaches the steps of building a small game. Both can be replayed from the workspace header. Each mode also has a short **Tour this view** guide.
-2. Start in **Apprentice** to arrange scenes on the map and edit the selected scene in the inspector. Drag a scene to move it. Drag from one scene’s bottom dot to another scene’s top dot to create a navigation edge, then assign that edge to a choice or command in the inspector so players can use it. Map positions are saved in the project ZIP. Switch to **Sage** to open `world.json` and work directly with the starter scenes, choices, and navigation edges. Its Explorer can show folders or flat paths and sort by name or type. Right-click a path for Rename or Delete, use tabs to move between files, and press Tab in the editor to indent. Changes in either mode belong to one project.
+1. Select **Create project**, enter a title and a semantic game version such as `1.0.0`, and open the starter story. Its first scene branches between the gate and watchtower. The watchtower demonstrates a typed `descend` command; the gate route demonstrates a state-changing choice. You can also **Import project ZIP** to resume an existing authoring project.
+   On your first new project in this browser, a small nonmodal card offers **Start tour** for a guided look around the Studio or **Not now** to go straight to work. The tour asks whether you prefer the visual Apprentice map or the file-based Sage editor. After the Studio tour, an optional **Game tutorial** teaches the steps of building a small game. Both can be replayed from the workspace header. Each mode also has a short **Tour this view** guide.
+2. Start in **Apprentice**. The small **Start here** card gives you a first experiment without taking over the screen. Drag boxes to arrange the map. Drag from a scene’s lower dot to another scene’s upper dot to create a player route, then assign that route to a choice or command in the Inspector. A folder groups scenes or other folders: drag from its lower dot to a box’s upper dot to place that box inside it. Folders are not playable locations, and nesting a folder does not create a route. Selecting a folder before adding a scene or folder places the new box inside it. The Inspector puts story text and player actions first; hover or focus its `?` buttons for help, resize its left edge, collapse it, or expand the whole map and Inspector to full screen. **Map tools** holds less frequent edits, and right-clicking a node or route opens a context menu. Map positions are saved in the project ZIP. Open **World → Translations** to edit locale keys used by scene text, choices, and dialogue. Select a key and language, then write its text in the large editor. New keys appear there when you use them in a scene or action. Switch to **Sage** to edit `world.json` directly. Its Explorer can show folders or flat paths and sort by name or type. Right-click a path for Rename or Delete, use tabs to move between files, and press Tab in the editor to indent. Changes in either mode belong to one project.
 3. Choose **Playtest** to try scene choices and commands in an isolated session. Create a checkpoint to revisit a branch; open the inspection panels for state and engine traces or advanced inputs. Choose **Play** to see the terminal-styled reader interface. Fix blocking issues shown in **Project diagnostics** before exporting.
 4. Choose **Download project ZIP** to keep an editable copy outside browser storage. Studio also keeps a local recovery copy and reminds you about unsaved work, but the ZIP is the deliberate portable authoring save.
 5. Choose **Export game ZIP** to make a playable copy. Extract the ZIP and open its `index.html` directly in a supported browser. The optional README downloads beside the game ZIP.
@@ -35,7 +35,7 @@ For a small worked example, read [The Lantern Crossing](fixtures/linear-three-no
 | --- | --- | --- |
 | **Project ZIP** | Author | The editable project file tree, including files the editor does not interpret. Import it back into Studio. |
 | **Game ZIP** | Player | A portable game with `index.html`. Extract it before opening it. |
-| **Player-save ZIP** | Player | One `player-save.json` session document. Download and import it through a compatible game's controls. It does not replace the project ZIP. |
+| **Player-save ZIP** | Player | One `save.json` session document. Download and import it through a compatible game's controls. It does not replace the project ZIP. |
 
 The main project files are `project.json` for identity, version, and default locale; `world.json` for story and game behavior; `locales/*.json` for translated text; `scripts/*` for declared source; and `assets/sha256/*` for managed media. The project ZIP also retains unrelated files byte for byte. See the [archive and save contract](docs/contracts/archive-save-fingerprint.md) for the exact formats.
 
@@ -87,8 +87,8 @@ For browser checks, install Playwright's browser binaries once if needed, then r
 
 ```sh
 npx playwright install chromium firefox webkit
-npx playwright test tests/e2e/export/export.spec.ts --config=playwright.config.ts
-npx playwright test --config=tests/e2e/studio/playwright.config.ts
+npm run test:e2e:export
+npm run test:e2e:studio
 ```
 
-The Studio suite builds and serves a production bundle. Browser results and remaining platform limitations should be reported separately from unit and contract checks. Historical candidate evidence is in [`docs/release/29C-evidence.md`](docs/release/29C-evidence.md); it is not approval for the current checkout.
+The Studio suite builds and serves a production bundle. Browser results and remaining platform limitations should be reported separately from unit and contract checks. The [v1.3 Apprentice evidence](docs/release/1.3-apprentice.md) records the latest local matrix. The [v1.2 follow-up](docs/release/1.2-follow-up-evidence.md) and [29C](docs/release/29C-evidence.md) documents are historical evidence for earlier checkouts.
