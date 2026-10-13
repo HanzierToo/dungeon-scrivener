@@ -64,6 +64,29 @@ describe('model validation', () => {
     expect(validateWorldDocument(invalid).ok).toBe(false);
   });
 
+  it('blocks a condition that compares a boolean state with text before Play can render it', () => {
+    const world = loadWorld() as import('./public-types.js').WorldDocument;
+    const invalid = {
+      ...world,
+      stateDefinitions: [...world.stateDefinitions, { key: 'start-looked-around', scopeKind: 'world' as const, valueType: 'boolean' as const, defaultValue: false }],
+      worldState: { ...world.worldState, 'start-looked-around': false },
+      nodes: world.nodes.map((node, index) => index === 0 ? {
+        ...node,
+        actions: { choices: [{ id: 'look-around', label: { kind: 'literal' as const, text: 'Look around' }, effects: [], condition: { kind: 'compare-state' as const, left: { scope: { kind: 'world' as const }, key: 'start-looked-around' }, operator: 'eq' as const, right: '' } }] },
+      } : node),
+    };
+    const result = validateWorldDocument(invalid);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'DS-MOD-049', entityId: 'look-around', blocks: ['play', 'export'] }));
+    expect(invalid.nodes[0]?.actions?.choices?.[0]?.condition).toMatchObject({ right: '' });
+    const repaired = { ...invalid, nodes: invalid.nodes.map((node, index) => index === 0 ? { ...node, actions: { choices: [{ ...node.actions!.choices![0]!, condition: { ...node.actions!.choices![0]!.condition!, right: false } }] } } : node) };
+    expect(validateWorldDocument(repaired).ok).toBe(true);
+    const wrongEffect = { ...repaired, nodes: repaired.nodes.map((node, index) => index === 0 ? {
+      ...node, actions: { choices: [{ ...node.actions!.choices![0]!, effects: [{ kind: 'set-state' as const, target: { scope: { kind: 'world' as const }, key: 'start-looked-around' }, value: '' }] }] },
+    } : node) };
+    expect(validateWorldDocument(wrongEffect).diagnostics).toContainEqual(expect.objectContaining({ code: 'DS-MOD-050', entityId: 'look-around', blocks: ['play', 'export'] }));
+  });
+
   it('does not mutate the validated model while applying defaults', () => {
     const world = loadWorld() as import('./public-types.js').WorldDocument;
     const defaulted = applyWorldDefaults(world);

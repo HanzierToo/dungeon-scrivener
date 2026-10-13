@@ -8,6 +8,7 @@ export interface PlayerProps {
   readonly view?: PlayerView | undefined;
   readonly onInput: (input: PlayerInput) => PlayerInputTransitionResult | void | Promise<PlayerInputTransitionResult | void>;
   readonly startupFailure?: DiagnosticReport | undefined;
+  readonly recoveryAction?: { readonly label: string; readonly onClick: () => void };
   readonly themeCss?: string;
   readonly mediaAssets?: MediaAssetApi | undefined;
   readonly locales?: readonly PlayerLocaleOption[];
@@ -21,9 +22,9 @@ export interface PlayerProps {
   readonly settingsContent?: ReactNode;
 }
 
-interface PlayerFeedback { readonly trace: readonly TransitionTraceRecord[]; readonly diagnostics: readonly Diagnostic[] }
+interface PlayerFeedback { readonly trace: readonly TransitionTraceRecord[]; readonly diagnostics: readonly Diagnostic[]; readonly scrollFromBlock?: number }
 
-export function Player({ view, onInput, startupFailure, themeCss, mediaAssets, locales = [], onLocaleChange, onLoad, saveSlots = [], onSave, persistenceNotice, onOpenSettings, titleContent, settingsContent }: PlayerProps) {
+export function Player({ view, onInput, startupFailure, recoveryAction, themeCss, mediaAssets, locales = [], onLocaleChange, onLoad, saveSlots = [], onSave, persistenceNotice, onOpenSettings, titleContent, settingsContent }: PlayerProps) {
   const [command, setCommand] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [typingSoundsEnabled, setTypingSoundsEnabled] = useState(true);
@@ -35,11 +36,27 @@ export function Player({ view, onInput, startupFailure, themeCss, mediaAssets, l
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputId = useId();
   const commandId = useId();
+  const transcript = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const fromBlock = actionFeedback?.scrollFromBlock;
+    if (fromBlock === undefined) return;
+    // Wait for the host's updated view to commit before measuring the new output.
+    const frame = requestAnimationFrame(() => {
+      const output = transcript.current;
+      if (!output) return;
+      const firstNewBlock = output.children[fromBlock];
+      if (fromBlock > 0 && !firstNewBlock) return;
+      const top = fromBlock > 0 && firstNewBlock ? output.scrollTop + firstNewBlock.getBoundingClientRect().top - output.getBoundingClientRect().top : 0;
+      output.scrollTo({ top: Math.max(0, top), behavior: 'instant' });
+      output.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [actionFeedback]);
   const fileInput = useRef<HTMLInputElement>(null);
   const safeTheme = themeCss && isOfflineSafeTheme(themeCss) ? themeCss : undefined;
   const hasRejectedTheme = Boolean(themeCss && !safeTheme);
 
-  if (startupFailure || !view) return <main className="ds-player ds-player__startup-error" role="alert"><h1>Game could not be started</h1>{startupFailure?.diagnostics.length ? startupFailure.diagnostics.map((diagnostic, index) => <DiagnosticMessage key={`${diagnostic.code}-${index}`} diagnostic={diagnostic} />) : <p>No playable session is available.</p>}</main>;
+  if (startupFailure || !view) return <main className="ds-player ds-player__startup-error" role="alert"><h1>Game could not be started</h1>{startupFailure?.diagnostics.length ? startupFailure.diagnostics.map((diagnostic, index) => <DiagnosticMessage key={`${diagnostic.code}-${index}`} diagnostic={diagnostic} />) : <p>No playable session is available.</p>}{recoveryAction && <button type="button" onClick={recoveryAction.onClick}>{recoveryAction.label}</button>}</main>;
   const activeView = view;
 
 
@@ -92,7 +109,15 @@ export function Player({ view, onInput, startupFailure, themeCss, mediaAssets, l
     setActionPending(true);
     try {
       const result = await onInput(input);
-      setActionFeedback(result ? { trace: result.trace, diagnostics: result.diagnostics.diagnostics } : undefined);
+      if (result) {
+        const failed = result.diagnostics.diagnostics.some(diagnostic => diagnostic.severity === 'error' || diagnostic.severity === 'fatal');
+        const textChanges = result.trace.filter(record => record.kind === 'state-change' && (record.effect?.kind === 'append-scene-text' || record.effect?.kind === 'show-scene-text' || record.effect?.kind === 'reset-scene-text'));
+        const travelled = result.trace.some(record => record.kind === 'node-transition');
+        const onlyAppended = !travelled && textChanges.length > 0 && textChanges.every(record => record.effect?.kind === 'append-scene-text');
+        setActionFeedback({ trace: result.trace, diagnostics: result.diagnostics.diagnostics,
+          ...(!failed && (textChanges.length || travelled) ? { scrollFromBlock: onlyAppended ? activeView.currentNode.blocks.length : 0 } : {}),
+        });
+      } else setActionFeedback(undefined);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The action could not be completed.';
@@ -105,7 +130,7 @@ export function Player({ view, onInput, startupFailure, themeCss, mediaAssets, l
 
   function submitCommand(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!command.trim()) return;
+    if (actionPending || !command.trim() || !activeView.commands.some(item => item.enabled)) return;
     void submitPlayerInput({ kind: 'command-text', rawText: command }).then(result => {
       if (!result || !result.diagnostics.diagnostics.some(diagnostic => diagnostic.severity === 'error' || diagnostic.severity === 'fatal')) setCommand('');
     });
@@ -129,10 +154,10 @@ export function Player({ view, onInput, startupFailure, themeCss, mediaAssets, l
     {view.diagnostics.length ? <section className="ds-player__diagnostics" aria-label="Game notices" aria-live="polite">{view.diagnostics.map((diagnostic, index) => <p key={`${diagnostic.code}-${index}`}>{diagnostic.message}</p>)}</section> : null}
     <div className="ds-player__layout">
       <main className="ds-player__main">
-        <article className="ds-player__scene" aria-labelledby="ds-player-scene-title"><h2 id="ds-player-scene-title">{view.currentNode.title}</h2><div className="ds-player__content">{view.currentNode.blocks.map((block, index) => renderBlock(block, `block-${index}`, mediaAssets, nodeId => { void submitPlayerInput({ kind: 'node-link', nodeId }); }))}</div></article>
+        <article className="ds-player__scene" aria-labelledby="ds-player-scene-title"><h2 id="ds-player-scene-title">{view.currentNode.title}</h2><div ref={transcript} className="ds-player__content" role="region" aria-label="Scene text" tabIndex={0}>{view.currentNode.blocks.map((block, index) => renderBlock(block, `block-${index}`, mediaAssets, nodeId => { void submitPlayerInput({ kind: 'node-link', nodeId }); }))}</div></article>
         {view.dialogue ? <section className="ds-player__dialogue" aria-labelledby="ds-player-speaker"><h3 id="ds-player-speaker">{view.dialogue.speakerName}</h3><p>{view.dialogue.text}</p><div className="ds-player__actions" aria-label="Dialogue options">{view.dialogue.options.map(option => <button type="button" key={option.id} disabled={!option.enabled || actionPending} title={!option.enabled ? option.disabledReason : undefined} onClick={() => void submitPlayerInput({ kind: 'dialogue-option', conversationId: view.dialogue!.conversationId, lineId: view.dialogue!.lineId, optionId: option.id })}>{option.label}{!option.enabled && option.disabledReason ? ` . ${option.disabledReason}` : ''}</button>)}{view.dialogue.canResume && !view.dialogue.options.length ? <p>Conversation can be resumed by an available game action.</p> : null}</div></section> : null}
         {(view.choices.length || view.commands.length) ? <section className="ds-player__choices" aria-labelledby="ds-player-choices-title"><h3 id="ds-player-choices-title">What do you do?</h3><div className="ds-player__actions">{view.choices.map(choice => <button type="button" key={choice.id} disabled={!choice.enabled || actionPending} title={!choice.enabled ? choice.disabledReason : undefined} onClick={() => void submitPlayerInput({ kind: 'choice', actionId: choice.id })}>{choice.label}{!choice.enabled && choice.disabledReason ? ` . ${choice.disabledReason}` : ''}</button>)}</div>
-          {view.commands.length ? <form className="ds-player__command" onSubmit={submitCommand}><label htmlFor={commandId}>Type an action</label><div className="ds-player__command-row"><input id={commandId} value={command} onChange={event => setCommand(event.currentTarget.value)} onKeyDown={event => playTypingSound(event.code)} autoComplete="off" /><button type="submit" disabled={actionPending}>Send</button></div><details><summary>Available commands</summary><ul>{view.commands.map(item => <li key={item.id}>{item.patterns.join(' / ')}{!item.enabled && item.disabledReason ? ` . ${item.disabledReason}` : ''}</li>)}</ul></details></form> : null}
+          {view.commands.length ? <form className="ds-player__command" onSubmit={submitCommand}><label htmlFor={commandId}>Type an action</label><div className="ds-player__command-row"><input id={commandId} value={command} onChange={event => setCommand(event.currentTarget.value)} onKeyDown={event => playTypingSound(event.code)} autoComplete="off" readOnly={actionPending} disabled={!view.commands.some(item => item.enabled)} /><button type="submit" disabled={actionPending || !view.commands.some(item => item.enabled)}>Send</button></div><details><summary>Available commands</summary><ul>{view.commands.map(item => <li key={item.id}>{item.patterns.join(' / ')}{!item.enabled && item.disabledReason ? ` . ${item.disabledReason}` : ''}</li>)}</ul></details></form> : null}
         </section> : null}
       </main>
       {view.inventory ? <aside className="ds-player__inventory" aria-labelledby="ds-player-inventory-title"><h2 id="ds-player-inventory-title">Inventory</h2>{view.inventory.length ? <ul>{view.inventory.map(item => <li key={item.stackId}><span>{item.label}{item.quantity > 1 ? ` × ${item.quantity}` : ''}</span>{item.equippedSlot ? <span className="ds-player__item-detail">Equipped: {item.equippedSlot}</span> : null}</li>)}</ul> : <p>Your inventory is empty.</p>}</aside> : null}

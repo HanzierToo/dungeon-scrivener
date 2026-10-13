@@ -97,6 +97,18 @@
       ],
       "additionalProperties": false
     },
+    "actionOutcome": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "condition": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/condition" },
+        "effects": { "type": "array", "items": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/effect" } },
+        "navigationEdgeId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }
+      },
+      "required": ["id", "name", "condition", "effects"],
+      "additionalProperties": false
+    },
     "textChoice": {
       "type": "object",
       "properties": {
@@ -118,6 +130,7 @@
         "navigationEdgeId": {
           "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
         },
+        "outcomes": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/actionOutcome" } },
         "effects": {
           "type": "array",
           "items": {
@@ -185,6 +198,7 @@
         "navigationEdgeId": {
           "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id"
         },
+        "outcomes": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/actionOutcome" } },
         "effects": {
           "type": "array",
           "items": {

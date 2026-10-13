@@ -64,7 +64,7 @@ Use the tutorial for the sequence of ideas. Use this manual for exact names and 
 ## 10. Diagnostics, accessibility, and authoring modes
 
 - Diagnostic document and action acknowledgments: [`diagnostics.schema.json`](../contracts/schemas/diagnostics.schema.json), [contract README](../contracts/README.md#common-document-rules).
-- Keyboard and focus requirements, and Apprentice/Sage mode boundaries: [shared agent brief](../../DungeonScrivener-Agent-Prompts/00-MASTER.md#immutable-behavior-for-all-agents).
+- Keyboard workflows and Apprentice/Sage mode boundaries: [Studio authoring guide](../../README.md#make-a-first-game).
 - The repository has no editor fixture or UI implementation in the referenced projects. The learning guide describes contract intent; it does not claim Sage or Apprentice behavior has been exercised.
 
 ## Appendices

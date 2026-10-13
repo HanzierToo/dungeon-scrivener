@@ -305,7 +305,8 @@ export async function downloadPlayerSave(
       anchor.click();
     } finally {
       anchor.remove();
-      browser.URL.revokeObjectURL(objectUrl);
+      // Allow the browser to receive the queued download before releasing its bytes.
+      globalThis.setTimeout(() => browser.URL.revokeObjectURL(objectUrl), 1000);
     }
     return encoded;
   } catch {

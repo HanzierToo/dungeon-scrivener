@@ -1,5 +1,6 @@
 export * from './commands.js';
 export * from './graph.js';
+export * from './layout.js';
 export * from './ApprenticeGraph.js';
 export * from './forms.js';
 export * from './ApprenticeScripts.js';

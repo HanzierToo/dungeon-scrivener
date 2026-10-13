@@ -33,3 +33,33 @@ Direct-open export remains a product requirement, not a verified result of the c
 ## Moving from Apprentice to Sage
 
 Apprentice Mode is the visual graph and form editor. Sage Mode is the file-tree IDE. The contract gives both modes the same project files. Start with Apprentice for graph and form edits, then open the same project in Sage when you want to inspect structured files or edit a supported script. Switching modes must preserve unknown Markdown and script source; it does not translate unsupported source into a different language. See the [transition notes](tutorial-outline.md#from-apprentice-to-sage).
+
+## Correcting and removing routes in Studio
+
+Select an existing map arrow and drag its target endpoint to another scene, or use **Change destination…**. Its source stays fixed. Click a scene-card action to change only that action’s destination. If a destination already has a route, the action editor reuses it rather than silently merging shared routes.
+
+**Remove route, keep actions** preserves the choice or command, its text, conditions, and effects. It clears the direct destination. The retained action remains on its source scene and can be reconnected there. Effects, rules, or dialogue that explicitly use the route must be repaired first. **Undo project edit** restores a whole edit; text editors keep their own native Undo.
+
+The Inspector separates Scene, Actions, Text / Translations, Logic, World, and Scripts. In Actions, a localized choice has its default-language text beside the key. Download an editable project ZIP before sharing a separate exported game ZIP.
+
+### Small interactions within a scene
+
+A choice such as “Look at the table” can replace the current description without travelling. In Actions, leave its Destination at Stay in this scene and choose Scene text after this action → Replace the description. Add a condition if it should only be available in a particular state. Another action can Restore the original description. Leaving the scene resets the response, and saving the game keeps it.
+
+Command phrases are complete words and phrases. Separate alternatives with a comma or `|`; escape a literal delimiter with a backslash. A placeholder such as `{item}` captures one word from player input and has an optional input-value definition. A command like “say help” needs no captured values.
+
+## One action, different outcomes
+
+Use Conditional outcomes when the same choice or typed command should do different things depending on game state. Name each outcome, choose its requirement, and author its response, effects, and optional destination. The first matching outcome runs. Otherwise runs when none match. Use Check earlier/later to decide precedence when conditions overlap.
+
+For Open the drawer, an Already emptied outcome can check whether the player has the manual and display the empty-drawer response. Otherwise can give the manual and display the discovery text. For Attempt to stand, an Already tried outcome checks the remembered value and displays the repeat response. Otherwise sets that value and displays the first response. Keep the action's availability condition for deciding when the choice should appear.
+
+Each result is complete: a conditional outcome does not also run Otherwise effects. Put shared consequences in each result that needs them. Predicates read the state before the action starts, so setting an Already tried value does not change the selected result midway.
+
+## A running terminal passage
+
+Choose Append to the description in an action's scene text response to keep the current text and print the new passage below it. Use it for inspection, dialogue-like replies, or command output that should remain readable without a Return choice. The scene's choices and commands stay available. Append also works inside Conditional outcomes, so first and repeat uses can add different passages.
+
+Replace the description starts a new display and clears accumulated output. Restore the original description clears the display back to the authored scene text. Leaving the scene starts the destination's normal description. A game save retains the current scene's accumulated output when saves are enabled. Markdown and translation keys work for each passage independently.
+
+Scripts can request `api.request({ kind: "append-scene-text", text: { kind: "literal", text: "The terminal hums quietly." } });`. The same transaction and rollback rules apply to append, replace, and restore.

@@ -59,7 +59,13 @@
 .ds-player__inventory::before { content: 'STATUS / INVENTORY'; }
 .ds-player__scene h2, .ds-player__choices h3, .ds-player__inventory h2 { color: #e9f8df; text-shadow: 0 0 12px rgb(168 251 161 / 22%); }
 .ds-player__scene h2 { margin-bottom: 1.3rem; font-size: clamp(1.4rem, 2.2vw, 1.9rem); }
-.ds-player__content { max-width: 68ch; line-height: 1.9; }
+.ds-player__content { width: 100%; height: clamp(14rem, 42dvh, 30rem); overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; scroll-margin-block: 4rem 1rem; scrollbar-gutter: stable; padding-right: .75rem; line-height: 1.9; }
+.ds-player__content, .ds-player__content pre { scrollbar-color: var(--ds-player-muted) var(--ds-player-bg); scrollbar-width: thin; }
+.ds-player__content::-webkit-scrollbar, .ds-player__content pre::-webkit-scrollbar { width: .65rem; height: .65rem; }
+.ds-player__content::-webkit-scrollbar-track, .ds-player__content pre::-webkit-scrollbar-track, .ds-player__content::-webkit-scrollbar-corner, .ds-player__content pre::-webkit-scrollbar-corner { background: var(--ds-player-bg); }
+.ds-player__content::-webkit-scrollbar-thumb, .ds-player__content pre::-webkit-scrollbar-thumb { border: 2px solid var(--ds-player-bg); border-radius: .2rem; background: var(--ds-player-muted); }
+.ds-player__content::-webkit-scrollbar-thumb:hover, .ds-player__content pre::-webkit-scrollbar-thumb:hover { background: var(--ds-player-accent); }
+.ds-player__content:focus-visible { outline: 3px solid var(--ds-player-accent); outline-offset: 3px; }
 .ds-player button, .ds-player input, .ds-player select { border-color: #8ea08a; border-radius: .18rem; background: #14231e; }
 .ds-player button:hover { border-color: var(--ds-player-accent); background: #294232; color: #fff3d9; }
 .ds-player__actions button { text-align: left; }

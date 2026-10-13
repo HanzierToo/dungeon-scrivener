@@ -489,7 +489,7 @@ class JavaScriptCompiler {
         const kindProperty = (effect.properties as unknown[]).map(asAst).find((property) => property.type === 'Property' && this.propertyName(asAst(property.key)) === 'kind');
         const effectKindNode = kindProperty && asAst(kindProperty.value);
         const effectKind = effectKindNode?.type === 'Literal' ? effectKindNode.value : undefined;
-        const allowedEffects = new Set(['set-state', 'increment-state', 'add-tag', 'remove-tag', 'emit-event', 'navigate', 'add-item', 'remove-item', 'start-conversation', 'interrupt-conversation', 'resume-conversation']);
+        const allowedEffects = new Set(['show-scene-text', 'append-scene-text', 'reset-scene-text', 'set-state', 'increment-state', 'add-tag', 'remove-tag', 'emit-event', 'navigate', 'add-item', 'remove-item', 'start-conversation', 'interrupt-conversation', 'resume-conversation']);
         if (typeof effectKind !== 'string' || !allowedEffects.has(effectKind)) this.reject(effect, 'api.request effect kind is unknown or forbidden; run-script cannot be requested.', 'api.request({ kind: "set-state", target: ..., value: true });');
       }
     }

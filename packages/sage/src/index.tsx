@@ -133,12 +133,39 @@ export class SageWorkspace {
   }
 
   delete(path: string): SageWorkspaceState {
-    this.current = deleteProjectPath(this.current, path);
-    this.scriptDiagnostics.delete(path);
-    if (this.active === path || this.active?.startsWith(`${path}/`)) this.active = undefined;
-    this.openPaths = this.openPaths.filter(item => item !== path && !item.startsWith(`${path}/`));
+    return this.deleteMany([path]);
+  }
+
+  deleteMany(paths: readonly string[]): SageWorkspaceState {
+    const roots = [...new Set(paths)].filter(path => !paths.some(parent => parent !== path && path.startsWith(`${parent}/`)));
+    if (!roots.length) return this.getState();
+    const removing = (path: string) => roots.some(root => path === root || path.startsWith(`${root}/`));
+    const core = ['project.json', 'world.json'].filter(removing);
+    if (core.length) throw new Error(`Keep ${core.join(', ')} to retain an editable project. Clear its content through Apprentice or edit the document instead.`);
+    for (const path of ['project.json', 'world.json']) {
+      const file = this.current.files.get(path);
+      if (!file) continue;
+      const parsed = parseJsonDocument(file.bytes, path);
+      if (!parsed.ok) throw new Error(`Repair ${path} before deleting project files so its references can be checked.`);
+      const used: string[] = [];
+      const inspect = (value: unknown, location: string): void => {
+        if (typeof value === 'string' && (removing(value) || value.startsWith('sha256:') && [...this.current.files.keys()].some(candidate => removing(candidate) && candidate.startsWith(`assets/sha256/${value.slice(7)}`)))) used.push(location);
+        else if (Array.isArray(value)) value.forEach((child, index) => inspect(child, `${location}[${index}]`));
+        else if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) inspect(child, `${location}.${key}`);
+      };
+      inspect(parsed.value, path);
+      if (path === 'project.json' && parsed.value && typeof parsed.value === 'object' && 'defaultLocale' in parsed.value && removing(`locales/${parsed.value.defaultLocale}.json`)) used.push('project.json.defaultLocale');
+      if (used.length) throw new Error(`Nothing was deleted. These project references still use selected files: ${used.join(', ')}. Update those references first.`);
+    }
+    let next = this.current;
+    for (const path of roots) next = deleteProjectPath(next, path);
+    this.current = next;
+    const removed = (path: string) => roots.some(root => path === root || path.startsWith(`${root}/`));
+    for (const path of this.scriptDiagnostics.keys()) if (removed(path)) this.scriptDiagnostics.delete(path);
+    if (this.active && removed(this.active)) this.active = undefined;
+    this.openPaths = this.openPaths.filter(path => !removed(path));
     if (!this.active) this.active = this.openPaths.at(-1);
-    this.dirty.add(path);
+    roots.forEach(path => this.dirty.add(path));
     return this.afterEdit();
   }
 
@@ -262,7 +289,13 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
   const [diagnosticQuery, setDiagnosticQuery] = useState('');
   const [diagnosticPage, setDiagnosticPage] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['locales', 'scripts', 'assets', 'styles']));
-  const [context, setContext] = useState<{ path: string; x: number; y: number }>();
+  const [selectedPaths, setSelectedPaths] = useState<readonly string[]>([]);
+  const [selectionAnchor, setSelectionAnchor] = useState('');
+  const [context, setContext] = useState<{ path?: string; x: number; y: number }>();
+  const [contextCreate, setContextCreate] = useState<{ directory: boolean; parent: string }>();
+  const [contextName, setContextName] = useState('');
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextNameRef = useRef<HTMLInputElement>(null);
   const editorHost = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | undefined>(undefined);
   const editorStates = useRef(new Map<string, EditorView['state']>());
@@ -323,11 +356,17 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
 
   useEffect(() => {
     if (!context) return;
-    const dismiss = () => setContext(undefined);
+    const menu = contextMenuRef.current;
+    if (menu) {
+      const rect = menu.getBoundingClientRect();
+      menu.style.left = `${Math.max(8, Math.min(context.x, window.innerWidth - rect.width - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(context.y, window.innerHeight - rect.height - 8))}px`;
+      (contextCreate ? contextNameRef.current : menu.querySelector<HTMLElement>('[role="menuitem"]'))?.focus();
+    }
+    const dismiss = (event: PointerEvent) => { if (!menu?.contains(event.target as Node)) { setContext(undefined); setContextCreate(undefined); } };
     document.addEventListener('pointerdown', dismiss);
-    document.addEventListener('keydown', dismiss);
-    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', dismiss); };
-  }, [context]);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [context, contextCreate]);
 
   const explorer = useMemo(() => {
     const files = [...state.snapshot.files.keys()];
@@ -358,6 +397,19 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
     return { files, directories, children, flatPaths: [...directories, ...files].sort(compare) };
   }, [state.snapshot, sort]);
   const { files, directories } = explorer;
+  const selected = selectedPaths.filter(path => directories.has(path) || state.snapshot.files.has(path));
+  const orderedPaths = useMemo(() => {
+    if (view === 'flat') return explorer.flatPaths;
+    const order: string[] = [];
+    const visit = (parent: string) => {
+      for (const path of explorer.children.get(parent) ?? []) {
+        order.push(path);
+        if (explorer.directories.has(path) && expanded.has(path)) visit(path);
+      }
+    };
+    visit('');
+    return order;
+  }, [explorer, expanded, view]);
   const fileMatches = useMemo(() => fileQuery.trim()
     ? files.filter(path => path.toLocaleLowerCase().includes(fileQuery.trim().toLocaleLowerCase())).sort((a, b) => a.localeCompare(b))
     : [], [files, fileQuery]);
@@ -413,6 +465,21 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
     update(workspace.closeTab(path));
     setTabs([...workspace.getOpenPaths()]);
   };
+  const selectPath = (path: string, event: React.MouseEvent<HTMLButtonElement>, order: readonly string[]) => {
+    if (event.shiftKey && order.includes(selectionAnchor)) {
+      const start = order.indexOf(selectionAnchor);
+      const end = order.indexOf(path);
+      const range = order.slice(Math.min(start, end), Math.max(start, end) + 1);
+      setSelectedPaths(event.metaKey || event.ctrlKey ? [...new Set([...selected, ...range])] : range);
+    } else if (event.metaKey || event.ctrlKey) {
+      setSelectedPaths(selected.includes(path) ? selected.filter(item => item !== path) : [...selected, path]);
+      setSelectionAnchor(path);
+    } else {
+      setSelectedPaths([path]);
+      setSelectionAnchor(path);
+      open(path);
+    }
+  };
   const create = (directory: boolean) => {
     if (!pathInput) return;
     try {
@@ -435,23 +502,64 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
       catch (error) { window.alert(error instanceof Error ? error.message : 'Unable to rename path.'); }
     }
   };
-  const remove = (path: string) => {
-    if (!window.confirm(`Delete ${path}${state.snapshot.files.has(path) ? '?' : ' and its contents? '}`)) return;
-    const next = workspace.delete(path);
-    for (const storedPath of [...editorStates.current.keys()]) if (storedPath === path || storedPath.startsWith(`${path}/`)) editorStates.current.delete(storedPath);
-    setTabs([...workspace.getOpenPaths()]);
-    update(next);
+  const removePaths = (paths: readonly string[]) => {
+    const targets = [...new Set(paths)].filter(path => directories.has(path) || state.snapshot.files.has(path));
+    if (!targets.length) return;
+    const description = targets.length === 1 ? `Delete ${targets[0]}${state.snapshot.files.has(targets[0]!) ? '?' : ' and its contents?'}` : `Delete ${targets.length} selected files or folders and their contents?`;
+    if (!window.confirm(`${description} Current edits are included. Undo project edit restores the files.`)) return;
+    try {
+      const next = workspace.deleteMany(targets);
+      for (const storedPath of [...editorStates.current.keys()]) if (targets.some(path => storedPath === path || storedPath.startsWith(`${path}/`))) editorStates.current.delete(storedPath);
+      setTabs([...workspace.getOpenPaths()]);
+      setSelectedPaths([]);
+      setSelectionAnchor('');
+      update(next);
+    } catch (error) { window.alert(error instanceof Error ? error.message : 'Unable to delete the selection.'); }
+  };
+  const handleExplorerKeys = (event: React.KeyboardEvent<HTMLElement>, order: readonly string[]) => {
+    if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+      event.preventDefault();
+      const focusedPath = event.target instanceof HTMLButtonElement ? event.target.dataset['path'] : undefined;
+      const rect = (event.target instanceof HTMLElement ? event.target : event.currentTarget).getBoundingClientRect();
+      showContext(focusedPath, rect.left + 12, rect.bottom + 4);
+    } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+      event.preventDefault(); event.stopPropagation(); setSelectedPaths(order); setSelectionAnchor(order[0] ?? '');
+    } else if (event.key === 'Delete' || event.metaKey && event.key === 'Backspace') {
+      event.preventDefault(); event.stopPropagation();
+      const focusedPath = event.target instanceof HTMLButtonElement ? event.target.dataset['path'] : undefined;
+      removePaths(selected.length ? selected : focusedPath ? [focusedPath] : []);
+    } else if (event.key === 'Escape' && selected.length) {
+      event.preventDefault(); event.stopPropagation(); setSelectedPaths([]); setSelectionAnchor('');
+    }
   };
 
-  const showContext = (path: string, x: number, y: number) => {
-    setContext({ path, x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 110) });
+  const showContext = (path: string | undefined, x: number, y: number) => {
+    if (path && !selected.includes(path)) { setSelectedPaths([path]); setSelectionAnchor(path); }
+    if (!path) { setSelectedPaths([]); setSelectionAnchor(''); }
+    setContextCreate(undefined);
+    setContext({ ...(path ? { path } : {}), x, y });
+  };
+  const contextParent = context?.path ? directories.has(context.path) ? context.path : context.path.includes('/') ? context.path.slice(0, context.path.lastIndexOf('/')) : '' : '';
+  const createFromContext = () => {
+    if (!contextCreate || !contextName.trim()) return;
+    const path = [contextCreate.parent, contextName.trim()].filter(Boolean).join('/');
+    try {
+      const next = contextCreate.directory ? workspace.createDirectory(path) : workspace.createFile(path);
+      update(next);
+      if (contextCreate.directory) setExpanded(current => new Set(current).add(path));
+      else open(path);
+      if (contextCreate.parent) setExpanded(current => new Set(current).add(contextCreate.parent));
+      setContext(undefined);
+      setContextCreate(undefined);
+      setContextName('');
+    } catch (error) { window.alert(error instanceof Error ? error.message : 'Unable to create path.'); contextNameRef.current?.focus(); }
   };
   const renderEntry = (path: string, depth: number): React.ReactNode => {
     const isDirectory = directories.has(path);
     const children = explorer.children.get(path) ?? [];
     return <li key={path}>
-      <div className={`sage-entry${state.activePath === path ? ' is-active' : ''}`} style={{ paddingLeft: `${.45 + depth * .85}rem` }} onContextMenu={event => { event.preventDefault(); showContext(path, event.clientX, event.clientY); }}>
-        <button type="button" className="sage-entry__name" aria-expanded={isDirectory ? expanded.has(path) : undefined} onClick={() => open(path)} onKeyDown={event => { if (event.key === 'F10' && event.shiftKey) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); showContext(path, rect.left, rect.bottom); } }} title={path}>
+      <div className={`sage-entry${state.activePath === path ? ' is-active' : ''}${selected.includes(path) ? ' is-selected' : ''}`} style={{ paddingLeft: `${.45 + depth * .85}rem` }} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); showContext(path, event.clientX, event.clientY); }}>
+        <button type="button" className="sage-entry__name" data-path={path} aria-pressed={selected.includes(path)} aria-expanded={isDirectory ? expanded.has(path) : undefined} onClick={event => selectPath(path, event, orderedPaths)} title={path}>
           <span aria-hidden="true" className="sage-entry__icon">{isDirectory ? expanded.has(path) ? '▾' : '▸' : '◇'}</span>{view === 'flat' ? path : path.split('/').at(-1)}
         </button>
         <button type="button" className="sage-entry__menu" aria-label={`Actions for ${path}`} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); showContext(path, rect.right - 180, rect.bottom); }}>···</button>
@@ -460,20 +568,23 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
     </li>;
   };
   const visiblePaths = view === 'flat' ? explorer.flatPaths : explorer.children.get('') ?? [];
+  const groupContext = !!context?.path && selected.length > 1 && selected.includes(context.path);
 
   return <section className="sage-mode" aria-label="Sage Mode file editor">
     <aside className="sage-file-tree" aria-label="Project files">
       <div className="sage-explorer-heading"><h2>Explorer</h2><span>{files.length} files</span></div>
       <div className="sage-explorer-settings"><label>View<select aria-label="Explorer view" value={view} onChange={event => { const next = event.currentTarget.value as 'tree' | 'flat'; setView(next); localStorage.setItem('ds-sage-view', next); }}><option value="tree">Folders</option><option value="flat">Flat paths</option></select></label><label>Sort<select aria-label="Explorer sort" value={sort} onChange={event => { const next = event.currentTarget.value as 'name' | 'type'; setSort(next); localStorage.setItem('ds-sage-sort', next); }}><option value="name">Name</option><option value="type">Type</option></select></label></div>
+      <p className="sage-explorer-hint">Shift-click for a range, Command/Ctrl-click to add, Command/Ctrl+A for visible entries, Delete or Command+Backspace to remove.</p>
+      {selected.length > 1 && <div className="sage-explorer-selection" aria-label="Explorer selection"><strong>{selected.length} selected</strong><button type="button" onClick={() => removePaths(selected)}>Delete selected</button></div>}
       <label className="sage-quick-open">Quick open <kbd>⌘/Ctrl P</kbd><input ref={quickOpenInput} type="search" aria-label="Quick open file" value={fileQuery} onChange={event => { setFileQuery(event.target.value); setFilePage(0); }} onKeyDown={event => {
         if (event.key === 'Escape') setFileQuery('');
         if (event.key === 'Enter' && fileMatches[0]) { open(fileMatches[0]); setFileQuery(''); }
       }} placeholder="Find a file by path" /></label>
-      {fileQuery.trim() ? <div className="sage-explorer-list sage-quick-results" aria-label="Matching files">
-        {fileMatches.slice(filePage * 60, (filePage + 1) * 60).map(path => <button key={path} type="button" onClick={() => { open(path); setFileQuery(''); }}>{path}</button>)}
+      {fileQuery.trim() ? <div className="sage-explorer-list sage-quick-results" aria-label="Matching files" tabIndex={0} onContextMenu={event => { event.preventDefault(); showContext(undefined, event.clientX, event.clientY); }} onKeyDown={event => handleExplorerKeys(event, fileMatches)}>
+        {fileMatches.slice(filePage * 60, (filePage + 1) * 60).map(path => <button key={path} type="button" data-path={path} aria-pressed={selected.includes(path)} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); showContext(path, event.clientX, event.clientY); }} onClick={event => selectPath(path, event, fileMatches)}>{path}</button>)}
         {!fileMatches.length && <p>No matching files.</p>}
         {fileMatches.length > 60 && <div className="sage-quick-results__pages"><button type="button" disabled={filePage === 0} onClick={() => setFilePage(page => page - 1)}>Previous</button><span>{filePage * 60 + 1}–{Math.min((filePage + 1) * 60, fileMatches.length)} of {fileMatches.length}</span><button type="button" disabled={(filePage + 1) * 60 >= fileMatches.length} onClick={() => setFilePage(page => page + 1)}>Next</button></div>}
-      </div> : <ul className="sage-explorer-list">{visiblePaths.map(path => renderEntry(path, 0))}</ul>}
+      </div> : <ul className="sage-explorer-list" tabIndex={0} aria-label="Explorer entries" onContextMenu={event => { event.preventDefault(); showContext(undefined, event.clientX, event.clientY); }} onKeyDown={event => handleExplorerKeys(event, orderedPaths)}>{visiblePaths.map(path => renderEntry(path, 0))}</ul>}
       <details className="sage-content-search"><summary>Search project text</summary>
         <form onSubmit={event => { event.preventDefault(); searchContent(); }}><input type="search" aria-label="Project text query" value={contentQuery} onChange={event => setContentQuery(event.target.value)} placeholder="Words or IDs" /><button type="submit" disabled={!contentQuery.trim()}>Search</button></form>
         {searching && <p role="status">Searching project files…</p>}
@@ -487,7 +598,21 @@ export function SageMode({ workspace, onStateChange, showExport = true }: SageMo
         const url = URL.createObjectURL(new Blob([zipBytes.buffer], { type: 'application/zip' }));
         const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'project.zip'; anchor.click(); URL.revokeObjectURL(url);
       }); }}>Export project ZIP</button> : null}
-      {context && <div className="sage-context-menu" role="menu" aria-label={`Actions for ${context.path}`} style={{ left: context.x, top: context.y }} onPointerDown={event => event.stopPropagation()}><button role="menuitem" onClick={() => { rename(context.path); setContext(undefined); }}>Rename</button><button role="menuitem" onClick={() => { remove(context.path); setContext(undefined); }}>Delete</button></div>}
+      {context && <div ref={contextMenuRef} className="sage-context-menu" role="menu" aria-label={context.path ? `Actions for ${context.path}` : 'Explorer background actions'} style={{ left: context.x, top: context.y }} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); setContext(undefined); setContextCreate(undefined); }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')]; const index = items.indexOf(document.activeElement as HTMLElement); items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus(); }
+      }}>
+        {contextCreate ? <label className="sage-context-create">{contextCreate.directory ? 'Folder name' : 'File name'}<input ref={contextNameRef} value={contextName} onChange={event => setContextName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); createFromContext(); } }} placeholder="Name" /><span>{contextCreate.parent || 'Project root'}</span><button type="button" role="menuitem" disabled={!contextName.trim()} onClick={createFromContext}>Create</button></label> : <>
+          {groupContext ? <><button type="button" role="menuitem" onClick={() => { selected.filter(path => state.snapshot.files.has(path)).forEach(path => open(path)); setContext(undefined); }}>Open selected files</button><button type="button" role="menuitem" className="sage-context-menu__danger" onClick={() => { removePaths(selected); setContext(undefined); }}>Delete selected</button></> : <>
+          {context.path && !directories.has(context.path) && <button type="button" role="menuitem" onClick={() => { open(context.path!); setContext(undefined); }}>Open</button>}
+          <button type="button" role="menuitem" onClick={() => { setContextCreate({ directory: false, parent: contextParent }); setContextName(''); }}>New file{context.path ? directories.has(context.path) ? ' in folder' : ' beside this file' : ''}</button>
+          <button type="button" role="menuitem" onClick={() => { setContextCreate({ directory: true, parent: contextParent }); setContextName(''); }}>New folder{context.path ? directories.has(context.path) ? ' in folder' : ' beside this file' : ''}</button>
+          {context.path && directories.has(context.path) && <button type="button" role="menuitem" onClick={() => { open(context.path!); setContext(undefined); }}>{expanded.has(context.path) ? 'Collapse' : 'Expand'}</button>}
+          {(!context.path && view === 'tree') && <button type="button" role="menuitem" onClick={() => { setExpanded(new Set()); setContext(undefined); }}>Collapse all</button>}
+          {context.path && <><button type="button" role="menuitem" onClick={() => { rename(context.path!); setContext(undefined); }}>Rename</button><button type="button" role="menuitem" className="sage-context-menu__danger" onClick={() => { removePaths([context.path!]); setContext(undefined); }}>Delete</button></>}
+          </>}
+        </>}
+      </div>}
     </aside>
     <main className="sage-editor-area">
       <nav aria-label="Open files" role="tablist">{tabs.map(path => <div className="sage-tab" key={path}><button type="button" role="tab" aria-selected={state.activePath === path} onClick={() => open(path)}>{path.split('/').at(-1)}</button><button type="button" className="sage-tab__close" aria-label={`Close ${path}`} onClick={() => closeTab(path)}>×</button></div>)}</nav>

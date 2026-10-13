@@ -109,7 +109,7 @@ class PortableGameController implements PortableGameHandle {
       world={this.data.world}
       locales={this.data.locales}
       requestedLocale={this.requestedLocale}
-      {...(this.options.localeOptions ? { localeOptions: this.options.localeOptions } : {})}
+      localeOptions={this.options.localeOptions ?? this.data.locales.map(locale => ({ locale: locale.locale, label: locale.locale }))}
       snapshot={this.snapshot}
       onSnapshot={snapshot => { this.snapshot = snapshot; this.render(); }}
       saveSlots={getSaveSlotChoices(this.data.world.savePolicy)}
@@ -176,7 +176,7 @@ class PortableGameController implements PortableGameHandle {
       onSave={slotId => this.save(slotId)}
       {...(getSaveSlotChoices(this.data.world.savePolicy).length > 0 ? { onLoad: (file: File) => { void this.load(file); } } : {})}
       {...(this.options.themeCss ? { themeCss: this.options.themeCss } : {})}
-      {...(this.options.localeOptions ? { localeOptions: this.options.localeOptions } : {})}
+      localeOptions={this.options.localeOptions ?? this.data.locales.map(locale => ({ locale: locale.locale, label: locale.locale }))}
       onLocaleChange={locale => { this.requestedLocale = locale; this.options.onLocaleChange?.(locale); this.render(); }}
       persistenceNotice={message}
     />);

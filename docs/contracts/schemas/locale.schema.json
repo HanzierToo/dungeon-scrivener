@@ -9,7 +9,6 @@
     "locale": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/locale" },
     "strings": {
       "type": "object",
-      "minProperties": 1,
       "propertyNames": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
       "additionalProperties": { "type": "string" }
     }

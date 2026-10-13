@@ -19,6 +19,7 @@
     "test:e2e": "npm run test:e2e:export && npm run test:e2e:studio",
     "test:e2e:export": "npm run build:portable --workspace @dungeon-scrivener/player && playwright test --config=playwright.config.ts",
     "test:e2e:studio": "playwright test --config=tests/e2e/studio/playwright.config.ts",
+    "test:e2e:ux": "playwright test --config=tests/e2e/studio/playwright.config.ts tests/e2e/studio/ux-audit.spec.ts --project=chromium --project=firefox",
     "check": "npm run check:contracts && npm run typecheck && npm test",
     "dev:studio": "npm run dev --workspace @dungeon-scrivener/studio",
     "build:studio": "npm run build --workspace @dungeon-scrivener/studio",

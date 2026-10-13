@@ -87,6 +87,9 @@ export type Condition =
 export type ComparisonOperator = 'eq' | 'neq' | 'lt' | 'lte' | 'gt' | 'gte';
 
 export type Effect =
+  | { readonly kind: 'show-scene-text'; readonly text: TextSource }
+  | { readonly kind: 'append-scene-text'; readonly text: TextSource }
+  | { readonly kind: 'reset-scene-text' }
   | { readonly kind: 'set-state'; readonly target: StateReference; readonly value: Scalar }
   | { readonly kind: 'increment-state'; readonly target: StateReference; readonly amount: number }
   | { readonly kind: 'add-tag' | 'remove-tag'; readonly entityId: EntityId; readonly tag: string }
@@ -109,6 +112,16 @@ export interface EventOccurrence {
   readonly source: string;
 }
 
+/** Checked in order against the snapshot at action selection. The first match replaces
+ * the action's fallback effects and destination; it does not change availability. */
+export interface ActionOutcome {
+  readonly id: StableId;
+  readonly name: string;
+  readonly condition: Condition;
+  readonly effects: readonly Effect[];
+  readonly navigationEdgeId?: StableId;
+}
+
 export interface ChoiceDefinition {
   readonly id: ChoiceId;
   readonly label: TextSource;
@@ -116,6 +129,7 @@ export interface ChoiceDefinition {
   readonly falsePolicy?: 'hide' | 'disable';
   readonly navigationEdgeId?: StableId;
   readonly effects: readonly Effect[];
+  readonly outcomes?: readonly ActionOutcome[];
 }
 
 export interface CommandParameterDefinition {
@@ -132,6 +146,7 @@ export interface CommandDefinition {
   readonly falsePolicy?: 'hide' | 'disable';
   readonly navigationEdgeId?: StableId;
   readonly effects: readonly Effect[];
+  readonly outcomes?: readonly ActionOutcome[];
 }
 
 export interface ActionSet {
@@ -678,6 +693,9 @@ export type DialogueHistoryEntry =
   | { readonly kind: 'option-selected'; readonly conversationId: ConversationId; readonly lineId: DialogueLineId; readonly optionId: DialogueOptionId };
 
 export interface SavedSessionState {
+  /** Current base description and ordered appended passages. Cleared on travel.
+   * Older saves may omit sceneText or its appended array. */
+  readonly sceneText?: { readonly nodeId: NodeId; readonly text: TextSource; readonly appended?: readonly TextSource[] };
   readonly currentNodeId: NodeId;
   readonly state: {
     readonly world: ScalarRecord;

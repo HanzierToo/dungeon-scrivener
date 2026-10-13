@@ -108,6 +108,14 @@ function validateScope(value: unknown): boolean {
 function validateEffect(value: unknown): value is ScriptEffect {
   if (!isRecord(value) || typeof value.kind !== 'string' || value.kind === 'run-script') return false;
   switch (value.kind) {
+    case 'show-scene-text':
+    case 'append-scene-text':
+      return isRecord(value.text) && (value.text.kind === 'literal'
+        ? typeof value.text.text === 'string' && hasOwnKeys(value.text, ['kind', 'text'])
+        : value.text.kind === 'locale-key' && typeof value.text.key === 'string' && IDENTIFIER.test(value.text.key) && hasOwnKeys(value.text, ['kind', 'key']))
+        && hasOwnKeys(value, ['kind', 'text']);
+    case 'reset-scene-text':
+      return hasOwnKeys(value, ['kind']);
     case 'set-state':
       return isRecord(value.target) && validateScope(value.target.scope)
         && typeof value.target.key === 'string' && STATE_KEY.test(value.target.key)

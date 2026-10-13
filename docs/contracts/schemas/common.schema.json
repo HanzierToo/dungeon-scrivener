@@ -282,6 +282,9 @@
     },
     "effect": {
       "oneOf": [
+        { "type": "object", "properties": { "kind": { "const": "show-scene-text" }, "text": { "$ref": "#/$defs/textSource" } }, "required": ["kind", "text"], "additionalProperties": false },
+        { "type": "object", "properties": { "kind": { "const": "append-scene-text" }, "text": { "$ref": "#/$defs/textSource" } }, "required": ["kind", "text"], "additionalProperties": false },
+        { "type": "object", "properties": { "kind": { "const": "reset-scene-text" } }, "required": ["kind"], "additionalProperties": false },
         {
           "type": "object",
           "properties": {

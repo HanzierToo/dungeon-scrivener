@@ -10,3 +10,22 @@ DungeonScrivener-Agent-Prompts
 .vscode
 .github
 .git
+
+# Local agent instructions and handovers
+.agents/
+.codex/
+.claude/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+SKILL.md
+*[Hh]andover*/
+*[Hh]andover*.md
+*NEW-AGENT-BRIEF*.md
+
+# Local implementation handovers and agent review instructions
+/docs/ux/redesign-implementation-*.md
+/docs/ux/feedback-fixes-*.md
+/docs/ux/conditional-outcomes-*.md
+/docs/ux/appended-text-*.md
+/docs/ux/MASTER-UI-UX-TESTING.md

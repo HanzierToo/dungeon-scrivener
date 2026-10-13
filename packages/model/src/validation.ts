@@ -1,6 +1,7 @@
 import Ajv2020 from 'ajv/dist/2020.js';
 import type { ErrorObject, ValidateFunction } from 'ajv';
 import type {
+  ActionOutcome,
   ActionSet,
   Condition,
   Diagnostic,
@@ -9,6 +10,7 @@ import type {
   ProjectManifest,
   RuleDefinition,
   ScriptIR,
+  StateFieldDefinition,
   WorldDocument,
 } from './public-types.js';
 import commonSchema from '../../../docs/contracts/schemas/common.schema.json';
@@ -307,7 +309,7 @@ export function resolveNodeRules(world: WorldDocument, nodeId: string): Validati
   };
 }
 
-function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnostic[] {
+export function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const error = (code: string, message: string, entityId?: string) => diagnostics.push({
     code,
@@ -319,6 +321,8 @@ function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnosti
       ? 'Reparent one of the nodes to remove the containment cycle.'
       : code === 'DS-MOD-004'
         ? 'Assign a unique stable ID within this collection.'
+        : code === 'DS-MOD-049' || code === 'DS-MOD-050'
+          ? 'Choose a comparison or effect value that matches the state definition, or change the state operation.'
         : 'Correct the stable ID reference or add the missing target.',
     blocks: ['play', 'export'],
   });
@@ -389,20 +393,29 @@ function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnosti
   const initialStackIds = new Set(world.initialInventory.map((stack) => stack.id));
   const scriptIds = new Set(world.scripts.map((script) => script.id));
   const ruleIds = new Set(world.rules.map((rule) => rule.id));
-  const validateStateReference = (reference: { readonly scope: { readonly kind: string; readonly ownerId?: string }; readonly key: string }, ownerId: string) => {
+  const validateStateReference = (reference: { readonly scope: { readonly kind: string; readonly ownerId?: string }; readonly key: string }, ownerId: string): StateFieldDefinition | undefined => {
     if (reference.scope.kind === 'world') {
-      if (!world.stateDefinitions.some((field) => field.scopeKind === 'world' && field.key === reference.key)) error('DS-MOD-020', `World state key '${reference.key}' is not defined.`, ownerId);
+      const field = world.stateDefinitions.find((candidate) => candidate.scopeKind === 'world' && candidate.key === reference.key);
+      if (!field) error('DS-MOD-020', `World state key '${reference.key}' is not defined.`, ownerId);
+      return field;
     } else if (reference.scope.kind === 'node') {
       if (!reference.scope.ownerId || !nodesById.has(reference.scope.ownerId)) error('DS-MOD-021', `State reference names missing node '${reference.scope.ownerId ?? ''}'.`, ownerId);
-      else if (!world.stateDefinitions.some((field) => field.scopeKind === 'node' && field.key === reference.key)) error('DS-MOD-020', `Node state key '${reference.key}' is not defined.`, ownerId);
+      else {
+        const field = world.stateDefinitions.find((candidate) => candidate.scopeKind === 'node' && candidate.key === reference.key);
+        if (!field) error('DS-MOD-020', `Node state key '${reference.key}' is not defined.`, ownerId);
+        return field;
+      }
     } else if (reference.scope.kind === 'entity') {
       const entity = reference.scope.ownerId ? world.entities.find((candidate) => candidate.id === reference.scope.ownerId) : undefined;
       if (!entity) error('DS-MOD-022', `State reference names missing entity '${reference.scope.ownerId ?? ''}'.`, ownerId);
       else {
         const definition = world.entityDefinitions.find((candidate) => candidate.id === entity.definitionId);
-        if (!definition?.fields.some((field) => field.key === reference.key)) error('DS-MOD-020', `Entity state key '${reference.key}' is not defined.`, ownerId);
+        const field = definition?.fields.find((candidate) => candidate.key === reference.key);
+        if (!field) error('DS-MOD-020', `Entity state key '${reference.key}' is not defined.`, ownerId);
+        return field;
       }
     }
+    return undefined;
   };
   const validateCondition = (condition: Condition | undefined, ownerId: string): void => {
     if (!condition) return;
@@ -415,7 +428,11 @@ function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnosti
         validateCondition(condition.condition, ownerId);
         break;
       case 'compare-state':
-        validateStateReference(condition.left, ownerId);
+        {
+          const field = validateStateReference(condition.left, ownerId);
+          if (field && !isTypedValue(condition.right, field)) error('DS-MOD-049', `Condition for state '${condition.left.key}' compares ${JSON.stringify(condition.right)} with a ${typeof field.valueType === 'string' ? field.valueType : 'enum'} state.`, ownerId);
+          if (field && !['eq', 'neq'].includes(condition.operator) && field.valueType !== 'number' && field.valueType !== 'integer') error('DS-MOD-049', `Condition for state '${condition.left.key}' uses an ordering comparison on a nonnumeric state.`, ownerId);
+        }
         break;
       case 'has-tag':
         if (!entityIds.has(condition.entityId)) error('DS-MOD-022', `Condition references missing entity '${condition.entityId}'.`, ownerId);
@@ -450,10 +467,16 @@ function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnosti
   const validateEffects = (effects: readonly Effect[], ownerId: string): void => {
     for (const effect of effects) {
       switch (effect.kind) {
-        case 'set-state':
-        case 'increment-state':
-          validateStateReference(effect.target, ownerId);
+        case 'set-state': {
+          const field = validateStateReference(effect.target, ownerId);
+          if (field && !isTypedValue(effect.value, field)) error('DS-MOD-050', `Effect sets state '${effect.target.key}' to a value that does not match its declared type.`, ownerId);
           break;
+        }
+        case 'increment-state': {
+          const field = validateStateReference(effect.target, ownerId);
+          if (field && field.valueType !== 'number' && field.valueType !== 'integer') error('DS-MOD-050', `Effect increments nonnumeric state '${effect.target.key}'.`, ownerId);
+          break;
+        }
         case 'add-tag':
         case 'remove-tag':
           if (!entityIds.has(effect.entityId)) error('DS-MOD-022', `Effect references missing entity '${effect.entityId}'.`, ownerId);
@@ -519,18 +542,28 @@ function worldSemanticDiagnostics(world: WorldDocument, path: string): Diagnosti
       }
     }
   };
+  const validateOutcomes = (outcomes: readonly ActionOutcome[] | undefined, actionId: string): void => {
+    checkDuplicateIds((outcomes ?? []).map(outcome => outcome.id), `outcomes of ${actionId}`);
+    for (const outcome of outcomes ?? []) {
+      validateCondition(outcome.condition, actionId);
+      if (outcome.navigationEdgeId && !edgeIds.has(outcome.navigationEdgeId)) error('DS-MOD-024', `Outcome '${outcome.name}' references missing navigation edge '${outcome.navigationEdgeId}'.`, actionId);
+      validateEffects(outcome.effects, actionId);
+    }
+  };
   const validateActionSet = (actions: ActionSet): void => {
     checkDuplicateIds([...actions.choices.map((choice) => choice.id), ...actions.commands.map((command) => command.id)], 'action set');
     for (const choice of actions.choices) {
       validateCondition(choice.condition, choice.id);
       if (choice.navigationEdgeId && !edgeIds.has(choice.navigationEdgeId)) error('DS-MOD-024', `Choice references missing navigation edge '${choice.navigationEdgeId}'.`, choice.id);
       validateEffects(choice.effects, choice.id);
+      validateOutcomes(choice.outcomes, choice.id);
     }
     for (const command of actions.commands) {
       checkDuplicateIds(command.parameters.map((parameter) => parameter.id), command.id);
       validateCondition(command.condition, command.id);
       if (command.navigationEdgeId && !edgeIds.has(command.navigationEdgeId)) error('DS-MOD-024', `Command references missing navigation edge '${command.navigationEdgeId}'.`, command.id);
       validateEffects(command.effects, command.id);
+      validateOutcomes(command.outcomes, command.id);
     }
   };
   validateActionSet(world.actionDefaults);

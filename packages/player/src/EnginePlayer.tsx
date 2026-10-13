@@ -5,6 +5,7 @@ import type {
   LocaleDocument,
   PlayerInput,
   PlayerInputTransitionResult,
+  PlayerView,
   ProjectManifest,
   SessionSnapshot,
   WorldDocument,
@@ -25,12 +26,22 @@ export interface EnginePlayerProps extends Omit<PlayerProps, 'view' | 'onInput' 
 
 /** Adapts the public engine API while leaving the authoritative snapshot with the host. */
 export function EnginePlayer({ engine, manifest, world, locales, requestedLocale, localeOptions, snapshot, startupFailure, onSnapshot, ...playerProps }: EnginePlayerProps) {
-  const view = snapshot && !startupFailure
-    ? engine.getPlayerView(manifest, world, locales, snapshot, requestedLocale)
-    : undefined;
+  let view: PlayerView | undefined;
+  let viewFailure: DiagnosticReport | undefined;
+  if (snapshot && !startupFailure) {
+    try {
+      view = engine.getPlayerView(manifest, world, locales, snapshot, requestedLocale);
+    } catch (error) {
+      viewFailure = { format: 'dungeon-scrivener-diagnostics', schemaVersion: 1, diagnostics: [{
+        code: 'DS-PLAYER-VIEW', severity: 'error',
+        message: error instanceof Error ? error.message : 'The current game view could not be rendered.',
+        blocks: ['play'],
+      }] };
+    }
+  }
 
   function submit(input: PlayerInput): PlayerInputTransitionResult | undefined {
-    if (!snapshot || startupFailure) return undefined;
+    if (!snapshot || startupFailure || viewFailure) return undefined;
     const result = engine.dispatchPlayerInput(world, snapshot, input);
     if (!result.diagnostics.diagnostics.some(diagnostic => diagnostic.severity === 'error' || diagnostic.severity === 'fatal')) {
       onSnapshot(result.snapshot);
@@ -38,5 +49,5 @@ export function EnginePlayer({ engine, manifest, world, locales, requestedLocale
     return result;
   }
 
-  return <Player {...playerProps} locales={localeOptions ?? []} view={view} startupFailure={startupFailure} onInput={submit} />;
+  return <Player {...playerProps} locales={localeOptions ?? []} view={view} startupFailure={startupFailure ?? viewFailure} onInput={submit} />;
 }

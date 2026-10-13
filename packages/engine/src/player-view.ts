@@ -4,7 +4,7 @@ import type {
 } from '@dungeon-scrivener/model';
 import { renderMarkdown } from '../../markdown/src/index.js';
 import { contentDigestFromHash, validateTypingSoundAsset } from '../../media/src/index.js';
-import { getAvailableActions, inspectActionAvailability } from './core/actions.js';
+import { getAvailableActions, inspectActionAvailability, inspectActionOutcomes } from './core/actions.js';
 import { clockHudValue } from './core/time.js';
 import { projectDialogueView } from './dialogue/index.js';
 
@@ -79,17 +79,18 @@ export function getPlayerView(
   const diagnostics: Pick<Diagnostic, 'code' | 'severity' | 'message'>[] = [];
   let currentNode: PlayerView['currentNode'];
   if (node) {
-    const markdown = renderMarkdown({
-      source: localize(node.content, requested, fallback),
-      path: `world.nodes.${node.id}.content`,
-      world,
-      locales,
-      locale,
-      defaultLocale: manifest.defaultLocale,
-      assets: mediaAssets,
+    const sceneText = snapshot.sceneText?.nodeId === node.id ? snapshot.sceneText : undefined;
+    const passages = [sceneText?.text ?? node.content, ...(sceneText?.appended ?? [])];
+    const blocks = passages.flatMap((passage, index) => {
+      const markdown = renderMarkdown({
+        source: localize(passage, requested, fallback),
+        path: index === 0 ? `world.nodes.${node.id}.content` : `session.sceneText.appended[${index - 1}]`,
+        world, locales, locale, defaultLocale: manifest.defaultLocale, assets: mediaAssets,
+      });
+      diagnostics.push(...markdown.diagnostics.map(playerDiagnostic));
+      return markdown.blocks;
     });
-    diagnostics.push(...markdown.diagnostics.map(playerDiagnostic));
-    currentNode = { id: node.id, title: localize(node.title, requested, fallback), blocks: markdown.blocks };
+    currentNode = { id: node.id, title: localize(node.title, requested, fallback), blocks };
   } else {
     diagnostics.push({ code: 'DS-ENG-021', severity: 'error', message: `Current node ${snapshot.currentNodeId} is not present in the world.` });
     currentNode = { id: snapshot.currentNodeId, title: snapshot.currentNodeId, blocks: [] };
@@ -100,22 +101,28 @@ export function getPlayerView(
   const choices = definitions.choices.flatMap((choice) => {
     const status = availability.choices.find((candidate) => candidate.id === choice.id);
     if (!status || status.visibility === 'hidden') return [];
+    const selectedEffects = snapshot.activeConversation !== null ? inspectActionOutcomes(world, snapshot, choice.outcomes).selected?.effects ?? choice.effects : choice.effects;
+    const conversationAlreadyActive = snapshot.activeConversation !== null && selectedEffects.length === 1 && selectedEffects[0]?.kind === 'start-conversation';
+    const enabled = status.enabled && !conversationAlreadyActive;
     return [{
       id: choice.id,
       label: localize(choice.label, requested, fallback),
-      enabled: status.enabled,
-      ...(!status.enabled ? { disabledReason: 'This choice is currently unavailable.' } : {}),
+      enabled,
+      ...(!enabled ? { disabledReason: conversationAlreadyActive ? 'Finish the current conversation first.' : 'This choice is currently unavailable.' } : {}),
     }];
   });
   const commands = definitions.commands.flatMap((command) => {
     const status = availability.commands.find((candidate) => candidate.id === command.id);
     if (!status || status.visibility === 'hidden') return [];
+    const selectedEffects = snapshot.activeConversation !== null ? inspectActionOutcomes(world, snapshot, command.outcomes).selected?.effects ?? command.effects : command.effects;
+    const conversationAlreadyActive = snapshot.activeConversation !== null && selectedEffects.length === 1 && selectedEffects[0]?.kind === 'start-conversation';
+    const enabled = status.enabled && !conversationAlreadyActive;
     return [{
       id: command.id,
       patterns: command.patterns,
       parameters: command.parameters,
-      enabled: status.enabled,
-      ...(!status.enabled ? { disabledReason: 'This command is currently unavailable.' } : {}),
+      enabled,
+      ...(!enabled ? { disabledReason: conversationAlreadyActive ? 'Finish the current conversation first.' : 'This command is currently unavailable.' } : {}),
     }];
   });
 

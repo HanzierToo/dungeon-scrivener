@@ -37,7 +37,7 @@ export function ApprenticeAuthorSettings({ world, project, assets = [], onWorldC
       <p>CSS files remain project files and can be edited in Sage. Only a project-local stylesheet path is stored in the world model.</p>
     </fieldset>
     <fieldset>
-      <legend>Typing sound mappings</legend>
+      <legend>Typing sounds for individual keys</legend><p>Choose a key or key group and the WAV sound to play when it is pressed. A physical key code identifies its keyboard position, such as KeyA, Enter, or Space.</p>
       <CollectionBrowser name="Sound mappings" items={sounds.mappings} title={mapping => mapping.target.kind === 'group' ? mapping.target.group : mapping.target.code} summary={mapping => `${Math.round(mapping.volume * 100)}% volume`}
         addLabel="Add key-group mapping" addDisabled={!soundAssets.length || !nextGroup} onAdd={() => {
           const asset = soundAssets[0];
@@ -49,7 +49,7 @@ export function ApprenticeAuthorSettings({ world, project, assets = [], onWorldC
           const target: TypingSoundTarget = kind === 'group' ? { kind: 'group', group: (value ?? 'letters') as typeof groups[number] } : { kind: 'key', code: mapping.target.kind === 'key' ? mapping.target.code : 'KeyA' };
           updateMapping(index, { ...mapping, target });
         }}><optgroup label="Key groups">{groups.map((group) => <option key={group} value={`group:${group}`}>{group}</option>)}</optgroup><option value="key">Exact key</option></select></label>
-        {mapping.target.kind === 'key' && <label>KeyboardEvent.code <input value={mapping.target.code} onChange={(event) => updateMapping(index, { ...mapping, target: { kind: 'key', code: event.target.value } })} /></label>}
+        {mapping.target.kind === 'key' && <label>Physical key code (for example, KeyA or Enter) <input value={mapping.target.code} onChange={(event) => updateMapping(index, { ...mapping, target: { kind: 'key', code: event.target.value } })} /></label>}
         <label>WAV asset <select value={`sha256:${mapping.assetHash}`} onChange={(event) => updateMapping(index, { ...mapping, assetHash: soundHash(event.target.value) })}><option value="">Choose WAV</option>{!soundAssets.some((asset) => soundHash(asset.assetId) === mapping.assetHash) && <option value={`sha256:${mapping.assetHash}`}>{mapping.assetHash} · unavailable</option>}{soundAssets.map((asset) => <option key={asset.assetId} value={asset.assetId}>{asset.originalFilenames.join(', ')} · {asset.assetId}</option>)}</select></label>
         <label>Volume <input type="number" min="0" max="1" step="0.01" value={mapping.volume} onChange={(event) => updateMapping(index, { ...mapping, volume: Number(event.target.value) })} /></label>
         <button type="button" onClick={() => updateSounds(sounds.mappings.filter((_item, i) => i !== index), sounds.fallback)}>Remove mapping</button>
@@ -57,7 +57,7 @@ export function ApprenticeAuthorSettings({ world, project, assets = [], onWorldC
       {!soundAssets.length && <p>No registered WAV assets are available. Add one through the media library to assign a typing sound.</p>}
     </fieldset>
     <fieldset>
-      <legend>Fallback typing sound</legend>
+      <legend>Sound for other keys</legend><p>This sound plays for keys without their own mapping. Choose silent to leave those keys quiet.</p>
       <label>Fallback <select value={sounds.fallback.kind} onChange={(event) => updateSounds(sounds.mappings, event.target.value === 'silent' ? { kind: 'silent' } : { kind: 'asset', assetHash: soundAssets[0] ? soundHash(soundAssets[0].assetId) : '', volume: 1 })}><option value="silent">Silent</option><option value="asset" disabled={!soundAssets.length}>Use WAV asset</option></select></label>
       {assetFallback && <><label>WAV asset <select value={`sha256:${assetFallback.assetHash}`} onChange={(event) => updateSounds(sounds.mappings, { ...assetFallback, assetHash: soundHash(event.target.value) })}>{!soundAssets.some((asset) => soundHash(asset.assetId) === assetFallback.assetHash) && <option value={`sha256:${assetFallback.assetHash}`}>{assetFallback.assetHash} · unavailable</option>}{soundAssets.map((asset) => <option key={asset.assetId} value={asset.assetId}>{asset.originalFilenames.join(', ')} · {asset.assetId}</option>)}</select></label><label>Volume <input type="number" min="0" max="1" step="0.01" value={assetFallback.volume} onChange={(event) => updateSounds(sounds.mappings, { ...assetFallback, volume: Number(event.target.value) })} /></label></>}
     </fieldset>

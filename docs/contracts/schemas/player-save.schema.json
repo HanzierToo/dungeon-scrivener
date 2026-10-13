@@ -81,6 +81,7 @@
     "session": {
       "type": "object",
       "properties": {
+        "sceneText": { "type": "object", "properties": { "nodeId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" }, "text": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/textSource" }, "appended": { "type": "array", "items": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/textSource" } } }, "required": ["nodeId", "text"], "additionalProperties": false },
         "currentNodeId": { "$ref": "urn:dungeon-scrivener:schema:v1:common#/$defs/id" },
         "state": {
           "type": "object",

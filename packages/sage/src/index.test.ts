@@ -41,6 +41,24 @@ describe('Sage workspace', () => {
     expect(workspace.getState().snapshot.files.has('notes/draft.txt')).toBe(false);
   });
 
+  it('deletes an overlapping file and folder selection as one validated workspace change', () => {
+    const workspace = new SageWorkspace(createSnapshot([
+      { path: 'notes/a.txt', bytes: enc.encode('a'), role: 'arbitrary' },
+      { path: 'notes/b.txt', bytes: enc.encode('b'), role: 'arbitrary' },
+      { path: 'keep.txt', bytes: enc.encode('keep'), role: 'arbitrary' }
+    ]));
+    workspace.open('notes/a.txt');
+    workspace.open('keep.txt');
+    expect(() => workspace.deleteMany(['notes', 'notes/a.txt', 'missing.txt'])).toThrow();
+    expect(workspace.getState().snapshot.files.has('notes/a.txt')).toBe(true);
+    workspace.deleteMany(['notes', 'notes/a.txt']);
+    expect(workspace.getState().snapshot.files.has('notes/a.txt')).toBe(false);
+    expect(workspace.getState().snapshot.files.has('notes/b.txt')).toBe(false);
+    expect(workspace.getState().snapshot.files.has('keep.txt')).toBe(true);
+    expect(workspace.getOpenPaths()).toEqual(['keep.txt']);
+    expect(workspace.getState().activePath).toBe('keep.txt');
+  });
+
   it('reports Lua syntax locations and edits only selected Python and locale files', async () => {
     const project = new Uint8Array(readFileSync('fixtures/linear-three-nodes/project.json'));
     const world = new Uint8Array(readFileSync('fixtures/linear-three-nodes/world.json'));

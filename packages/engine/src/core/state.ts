@@ -113,6 +113,19 @@ export function reduceEffects(
   const diagnostics: Diagnostic[] = [];
   for (const effect of effects) {
     trace.push({ sequence: trace.length, kind: 'effect-request', source: { ...source }, reason, effect: structuredClone(effect) });
+    if (effect.kind === 'show-scene-text' || effect.kind === 'append-scene-text' || effect.kind === 'reset-scene-text') {
+      const next = { ...provisional };
+      if (effect.kind === 'show-scene-text') next.sceneText = { nodeId: provisional.currentNodeId, text: structuredClone(effect.text) };
+      else if (effect.kind === 'append-scene-text') {
+        const current = provisional.sceneText?.nodeId === provisional.currentNodeId ? provisional.sceneText : undefined;
+        const base = current?.text ?? world.nodes.find(node => node.id === provisional.currentNodeId)?.content;
+        if (!base) { diagnostics.push(effectDiagnostic(`Cannot append text to missing scene '${provisional.currentNodeId}'.`, provisional.currentNodeId)); break; }
+        next.sceneText = { nodeId: provisional.currentNodeId, text: structuredClone(base), appended: [...(current?.appended ?? []), structuredClone(effect.text)] };
+      } else delete next.sceneText;
+      provisional = next;
+      trace.push({ sequence: trace.length, kind: 'state-change', source: { ...source }, reason, effect: structuredClone(effect) });
+      continue;
+    }
     if (effect.kind === 'set-state' || effect.kind === 'increment-state') {
       const field = fieldForReference(world, provisional, effect.target);
       if (!field) {

@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ApprenticeForms, ApprenticeGraph, ApprenticeScripts, type GraphPositions } from '@dungeon-scrivener/apprentice';
+import { ApprenticeForms, ApprenticeGraph, ApprenticeScripts, emptyGraphLayout, parseGraphLayout, type GraphLayout } from '@dungeon-scrivener/apprentice';
 import { PlaytestDebugger } from '@dungeon-scrivener/debugger';
 import { collectDiagnostics, getAcknowledgementStatus } from '@dungeon-scrivener/diagnostics';
 import { createGameEngine } from '@dungeon-scrivener/engine';
 import { exportGame } from '@dungeon-scrivener/exporter';
 import { createMediaAssetCatalog, type RegisteredAsset } from '@dungeon-scrivener/media';
-import { computeContentFingerprint, validateProject, validateProjectManifest, type CompiledScriptBundle, type Diagnostic, type LocaleDocument, type PlayerSaveArchive, type ProjectFile, type ProjectManifest, type ProjectVfsSnapshot, type SaveCompatibilityTarget, type SessionSnapshot, type WorldDocument } from '@dungeon-scrivener/model';
+import { computeContentFingerprint, resolveNodeActions, validateProject, validateProjectManifest, type CompiledScriptBundle, type Diagnostic, type LocaleDocument, type PlayerSaveArchive, type ProjectFile, type ProjectManifest, type ProjectVfsSnapshot, type SaveCompatibilityTarget, type SessionSnapshot, type WorldDocument } from '@dungeon-scrivener/model';
 import { clearRecovery, loadRecovery, saveRecovery } from '@dungeon-scrivener/persistence';
 import { addProjectFile, readProjectFile, readProjectZip, replaceProjectFile, writeProjectZip, createSnapshot } from '@dungeon-scrivener/vfs';
 import { SageMode, SageWorkspace } from '@dungeon-scrivener/sage';
@@ -15,6 +15,9 @@ import { downloadPlayerSave, getSaveSlotChoices, importHostedSaveFile } from '@d
 import { getPortablePlayerArtifact } from '@dungeon-scrivener/player/portable-artifact';
 import { compileWorldScripts, scriptExecutor } from '@dungeon-scrivener/scripting';
 import { shouldOfferModeTour, shouldOfferStudioTour, StudioTour, type TourKind, type TourPhase } from './StudioTour.js';
+import { StudioErrorBoundary } from './StudioErrorBoundary.js';
+import { ashenLayout, ashenLocale, ashenManifest, ashenWorld } from './examples/ashen-bell.js';
+import { SamplePreview } from './examples/SamplePreview.js';
 import linearManifest from '../../../fixtures/linear-three-nodes/project.json';
 import linearWorld from '../../../fixtures/linear-three-nodes/world.json';
 import linearLocale from '../../../fixtures/linear-three-nodes/locales/en-GB.json';
@@ -25,6 +28,7 @@ import './studio.css';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const GRAPH_LAYOUT_PATH = 'studio/graph-layout.json';
+let lastAuthorSnapshot: ProjectVfsSnapshot | null = null;
 const starterWorld = {
   ...linearWorld,
   nodes: [
@@ -54,16 +58,16 @@ type PreparedProject = { snapshot: ProjectVfsSnapshot; manifest: ProjectManifest
 type PlayConfig = { scripts: CompiledScriptBundle; media: ReturnType<typeof createMediaAssetCatalog>; compatibility: SaveCompatibilityTarget; themeCss: string };
 type StudioAction = 'save-project' | 'play' | 'export';
 
-function snapshotFromData(manifest: unknown, world: unknown, locales: Record<string, unknown> = {}): ProjectVfsSnapshot {
+function snapshotFromData(manifest: unknown, world: unknown, locales: Record<string, unknown> = {}, layout?: GraphLayout): ProjectVfsSnapshot {
   const files: ProjectFile[] = [
     { path: 'project.json', bytes: encoder.encode(JSON.stringify(manifest, null, 2)), role: 'manifest' as const },
     { path: 'world.json', bytes: encoder.encode(JSON.stringify(world, null, 2)), role: 'world' as const },
-    { path: GRAPH_LAYOUT_PATH, bytes: encoder.encode(JSON.stringify({ schemaVersion: 1, positions: {
+    { path: GRAPH_LAYOUT_PATH, bytes: encoder.encode(JSON.stringify(layout ?? { schemaVersion: 2, positions: {
       'old-gate': { x: 0, y: 0 },
       'stone-bridge': { x: -240, y: 240 },
       'watchtower': { x: 240, y: 240 },
       'lantern-house': { x: 0, y: 480 },
-    } }, null, 2)), role: 'arbitrary' as const },
+    }, sections: [] }, null, 2)), role: 'arbitrary' as const },
     ...Object.entries(locales).map(([path, locale]) => ({ path, bytes: encoder.encode(JSON.stringify(locale, null, 2)), role: 'locale' as const })),
   ];
   return createSnapshot(files);
@@ -75,15 +79,9 @@ function parseFile(snapshot: ProjectVfsSnapshot, path: string): unknown {
   try { return JSON.parse(decoder.decode(file.bytes)); } catch { return undefined; }
 }
 
-function readGraphPositions(snapshot: ProjectVfsSnapshot): GraphPositions {
+function readGraphLayout(snapshot: ProjectVfsSnapshot): GraphLayout | null {
   const layout = parseFile(snapshot, GRAPH_LAYOUT_PATH);
-  if (!layout || typeof layout !== 'object' || !('schemaVersion' in layout) || layout.schemaVersion !== 1 || !('positions' in layout) || !layout.positions || typeof layout.positions !== 'object') return {};
-  return Object.fromEntries(Object.entries(layout.positions).filter((entry): entry is [string, { x: number; y: number }] => {
-    const value = entry[1];
-    return !!value && typeof value === 'object' && 'x' in value && 'y' in value
-      && typeof value.x === 'number' && Number.isFinite(value.x) && Math.abs(value.x) <= 100000
-      && typeof value.y === 'number' && Number.isFinite(value.y) && Math.abs(value.y) <= 100000;
-  }));
+  return layout === undefined ? emptyGraphLayout() : parseGraphLayout(layout);
 }
 
 function diagnosticMessage(item: Diagnostic, world: WorldDocument | undefined, locale: LocaleDocument | undefined): string {
@@ -139,12 +137,26 @@ function referencedMedia(world: WorldDocument, locales: readonly LocaleDocument[
 
 function App(): React.ReactElement {
   const [mode, setMode] = useState<Mode>('home');
+  const [samplePlaying, setSamplePlaying] = useState(false);
   const [snapshot, setSnapshot] = useState<ProjectVfsSnapshot | null>(null);
+  const projectHistory = useRef<{ current: ProjectVfsSnapshot | null; past: ProjectVfsSnapshot[]; future: ProjectVfsSnapshot[]; restoring: boolean }>({ current: null, past: [], future: [], restoring: false });
+  const [historyRevision, setHistoryRevision] = useState(0);
+  useEffect(() => {
+    const history = projectHistory.current;
+    if (snapshot === history.current) return;
+    if (!snapshot || snapshot.projectId !== history.current?.projectId) { history.past = []; history.future = []; }
+    else if (!history.restoring && history.current) { history.past = [...history.past.slice(-59), history.current]; history.future = []; }
+    history.current = snapshot;
+    history.restoring = false;
+    setHistoryRevision(value => value + 1);
+  }, [snapshot]);
+
   const [analysisSnapshot, setAnalysisSnapshot] = useState<ProjectVfsSnapshot | null>(null);
   const [diagnosticQuery, setDiagnosticQuery] = useState('');
   const [diagnosticPage, setDiagnosticPage] = useState(0);
   const [revision, setRevision] = useState(0);
   const [status, setStatus] = useState('');
+  useEffect(() => { if (!status) return; const timer = window.setTimeout(() => setStatus(''), 3000); return () => window.clearTimeout(timer); }, [status]);
   const [operationError, setOperationError] = useState('');
   const [playActivity, setPlayActivity] = useState('');
   const [persistenceNotice, setPersistenceNotice] = useState('');
@@ -166,7 +178,10 @@ function App(): React.ReactElement {
   const [tourPhase, setTourPhase] = useState<TourPhase>(null);
   const [tourKind, setTourKind] = useState<TourKind>('studio');
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
-  const [inspectorTab, setInspectorTab] = useState<'scene' | 'world' | 'scripts'>('scene');
+  const [actionFocus, setActionFocus] = useState<{ kind: 'choice' | 'command'; id: string; outcomeId?: string | undefined; request: number }>();
+  const [requestedWorldSection, setRequestedWorldSection] = useState<{ section: string; entityId?: string | undefined; request: number }>();
+  const [selectedDiagnostic, setSelectedDiagnostic] = useState<Diagnostic>();
+  const [inspectorTab, setInspectorTab] = useState<'scene' | 'actions' | 'text' | 'logic' | 'world' | 'scripts'>('scene');
   const [inspectorWidth, setInspectorWidth] = useState(440);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
@@ -184,6 +199,28 @@ function App(): React.ReactElement {
   const [acknowledged, setAcknowledged] = useState<Set<string>>(() => new Set());
   const workspaceRef = useRef<SageWorkspace | null>(null);
   const snapshotRef = useRef<ProjectVfsSnapshot | null>(null);
+  if (snapshotRef.current ?? snapshot) lastAuthorSnapshot = snapshotRef.current ?? snapshot;
+
+  useEffect(() => {
+    const reportUnexpected = (reason: unknown) => {
+      const message = reason instanceof Error ? reason.message : String(reason ?? 'An unexpected error occurred.');
+      setOperationError(`Unexpected Studio error: ${message}`);
+      setStatus(`Unexpected Studio error: ${message}`);
+      setErrorDialogOpen(true);
+      setTourPhase(null);
+      if (mode === 'play' || mode === 'playtest') setMode('apprentice');
+    };
+    const onError = (event: ErrorEvent) => {
+      // Browsers report ResizeObserver layout-cycle notices through window.error.
+      // They are nonfatal and opening a modal here interrupts map interactions.
+      if (/^ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)\.?$/.test(event.message)) return;
+      reportUnexpected(event.error ?? event.message);
+    };
+    const onRejection = (event: PromiseRejectionEvent) => reportUnexpected(event.reason);
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => { window.removeEventListener('error', onError); window.removeEventListener('unhandledrejection', onRejection); };
+  }, [mode]);
   const manifestFile = snapshot?.files.get('project.json');
   const worldFile = snapshot?.files.get('world.json');
   const layoutFile = snapshot?.files.get(GRAPH_LAYOUT_PATH);
@@ -196,7 +233,7 @@ function App(): React.ReactElement {
     if (value) worldCache.current = { file: worldFile, value };
     return value;
   }, [worldFile]);
-  const graphPositions = useMemo(() => snapshot ? readGraphPositions(snapshot) : {}, [layoutFile]);
+  const graphLayout = useMemo(() => snapshot ? readGraphLayout(snapshot) : emptyGraphLayout(), [layoutFile]);
   const localeCache = useRef(new Map<string, { file: ProjectFile; value: LocaleDocument | undefined }>());
   const previousLocales = useRef<LocaleDocument[]>([]);
   const locales = useMemo(() => {
@@ -379,6 +416,8 @@ function App(): React.ReactElement {
   }, [mode, activeEngine, world, playSnapshot?.projectId]);
 
   function openProject(next: ProjectVfsSnapshot, message: string, unsaved = false, initialMode: 'sage' | 'apprentice' = 'sage'): void {
+    projectHistory.current = { current: next, past: [], future: [], restoring: false };
+    setHistoryRevision(value => value + 1);
     window.scrollTo(0, 0);
     setOperationError('');
     setPersistenceNotice('');
@@ -522,6 +561,23 @@ function App(): React.ReactElement {
     }
   }
 
+  function restoreProjectEdit(direction: 'undo' | 'redo'): void {
+    const history = projectHistory.current;
+    const current = snapshotRef.current;
+    const source = direction === 'undo' ? history.past : history.future;
+    const next = source.at(-1);
+    if (!current || !next) return;
+    source.pop();
+    (direction === 'undo' ? history.future : history.past).push(current);
+    history.restoring = true;
+    snapshotRef.current = next;
+    setSnapshot(next);
+    workspaceRef.current = null;
+    setUnsavedSince(Date.now());
+    setRevision(value => value + 1);
+    setStatus(direction === 'undo' ? 'Project edit undone.' : 'Project edit restored.');
+  }
+
   function updateWorld(next: WorldDocument): void {
     if (!snapshot) return;
     const current = snapshotRef.current ?? snapshot;
@@ -536,10 +592,11 @@ function App(): React.ReactElement {
     setRevision(value => value + 1);
   }
 
-  function updateGraphPositions(positions: GraphPositions): void {
+  function updateGraphLayout(layout: GraphLayout): void {
     const current = snapshotRef.current;
     if (!current) return;
-    const bytes = encoder.encode(JSON.stringify({ schemaVersion: 1, positions }, null, 2));
+    if (readGraphLayout(current) === null) { setStatus('This project uses an unsupported map layout version. Edit it in Sage before changing map positions or sections.'); return; }
+    const bytes = encoder.encode(JSON.stringify(layout, null, 2));
     const updated = current.files.has(GRAPH_LAYOUT_PATH)
       ? replaceProjectFile(current, GRAPH_LAYOUT_PATH, bytes)
       : addProjectFile(current, { path: GRAPH_LAYOUT_PATH, bytes, role: 'arbitrary' });
@@ -569,6 +626,29 @@ function App(): React.ReactElement {
     workspaceRef.current = null;
     setUnsavedSince(Date.now());
     setReminderVisible(false);
+    setRevision(value => value + 1);
+  }
+
+  function updateProjectContent(nextWorld: WorldDocument, nextLocales: readonly LocaleDocument[]): void {
+    const current = snapshotRef.current;
+    if (!current) return;
+    let updated = nextWorld === world ? current : replaceProjectFile(current, 'world.json', encoder.encode(JSON.stringify(nextWorld, null, 2)));
+    for (const locale of nextLocales) {
+      if (locales.some(existing => existing.locale === locale.locale && existing === locale)) continue;
+      const path = `locales/${locale.locale}.json`;
+      const bytes = encoder.encode(JSON.stringify(locale, null, 2));
+      updated = updated.files.has(path)
+        ? replaceProjectFile(updated, path, bytes)
+        : addProjectFile(updated, { path, bytes, role: 'locale' });
+    }
+    if (updated === current) return;
+    if (nextWorld !== world) worldCache.current = { file: updated.files.get('world.json')!, value: nextWorld };
+    snapshotRef.current = updated;
+    setSnapshot(updated);
+    workspaceRef.current = null;
+    setUnsavedSince(Date.now());
+    setReminderVisible(false);
+    setStatus('Apprentice changes saved to the project.');
     setRevision(value => value + 1);
   }
 
@@ -711,6 +791,8 @@ function App(): React.ReactElement {
     openProject(result.snapshot, 'Recovery copy restored.', true);
   }
 
+  if (samplePlaying) return <SamplePreview onClose={() => setSamplePlaying(false)} />;
+
   if (!snapshot || mode === 'home') {
     return <div className="landing">
       <div className="landing-topbar"><div className="brand"><span className="brand-mark" aria-hidden="true">✦</span><span>DungeonScrivener</span></div><span className="landing-topbar__meta">THE INTERPRETER <span aria-hidden="true">/</span> AUTHORING STUDIO</span></div>
@@ -725,6 +807,11 @@ function App(): React.ReactElement {
           <div><span>02</span><strong>Walk the paths</strong><small>Playtest choices, commands, and state.</small></div>
           <div><span>03</span><strong>Send it out</strong><small>Export a portable game for readers.</small></div>
         </div>
+        <section className="home-sample" aria-labelledby="sample-title"><span className="eyebrow">PLAY A COMPLETE EXAMPLE</span><h2 id="sample-title">The Ashen Bell</h2><p>At dusk, a flood threatens a village whose warning bell has fallen silent. Follow the story, then open an editable copy to see its states, dialogue, commands, and branching endings.</p><div><button type="button" className="button-primary" onClick={() => setSamplePlaying(true)}>Play example</button><button type="button" onClick={() => {
+          if (unsavedSince && !window.confirm('This project has work that has not been downloaded as a ZIP. Open an editable copy of the example anyway?')) return;
+          const manifest = { ...ashenManifest, projectId: `project-${crypto.randomUUID()}` };
+          openProject(snapshotFromData(manifest, ashenWorld, { 'locales/en-GB.json': ashenLocale }, ashenLayout), 'Editable copy of The Ashen Bell opened.', true, 'apprentice');
+        }}>Open editable copy</button></div><a href="/examples/ashen-bell-guide.md" target="_blank" rel="noreferrer">Sample guide</a></section>
       </section>
       <section className="home-panel" aria-labelledby="new-project-title">
         <div className="home-panel__heading"><span className="eyebrow">YOUR NEXT CHAPTER</span><h2 id="new-project-title">Begin a project</h2><p>Start with a small playable story. You can change it as you learn.</p></div>
@@ -752,11 +839,52 @@ function App(): React.ReactElement {
         <div className="home-import"><div><strong>Already have a project?</strong><span>Bring your editable ZIP back into the studio.</span></div><label className={`button${importing ? ' is-disabled' : ''}`} aria-busy={importing}>Import project ZIP<input type="file" accept=".zip,application/zip" disabled={importing} onChange={event => void importZip(event.currentTarget.files?.[0])} /></label></div>
       {importing && <p role="status" aria-live="polite">Importing project ZIP. Please wait.</p>}
       {recoveryAvailable && <div className="home-recovery"><span>A local recovery copy is available on this device.</span><button onClick={() => void restoreRecovery()}>Restore recovery</button></div>}
-      {status && <p role="status">{status}</p>}
+      {status && <div className="studio-toast" role="status"><span>{status}</span><button type="button" aria-label="Dismiss notification" onClick={() => setStatus('')}>×</button></div>}
       </section>
       </main>
       <footer className="landing-footer"><span>CRAFTED FOR STORIES THAT BRANCH</span><span>LOCAL FIRST · PORTABLE BY DESIGN</span></footer>
     </div>;
+  }
+
+  function diagnosticTarget(item: Diagnostic) {
+    const id = item.entityId;
+    const pointer = /(?:at |at)(\/[^: ]*)/u.exec(item.message)?.[1] ?? '';
+    const node = world?.nodes.find(node => node.id === id || node.actions?.choices?.some(action => action.id === id || action.outcomes?.some(outcome => outcome.id === id)) || node.actions?.commands?.some(action => action.id === id || action.outcomes?.some(outcome => outcome.id === id)));
+    const edge = world?.navigationEdges.find(edge => edge.id === id);
+    const source = node ?? world?.nodes.find(node => node.id === edge?.fromNodeId);
+    if (source) {
+      const actions = resolveNodeActions(world!, source.id).value;
+      const choice = actions?.choices.find(action => action.id === id || action.outcomes?.some(outcome => outcome.id === id) || !!edge && (action.navigationEdgeId === edge.id || action.outcomes?.some(outcome => outcome.navigationEdgeId === edge.id)));
+      const command = actions?.commands.find(action => action.id === id || action.outcomes?.some(outcome => outcome.id === id) || !!edge && (action.navigationEdgeId === edge.id || action.outcomes?.some(outcome => outcome.navigationEdgeId === edge.id)));
+      return { nodeId: source.id, tab: choice || command || pointer.includes('/actions/') ? 'actions' as const : /state|rule|inherit|lifecycle/u.test(pointer) ? 'logic' as const : 'scene' as const,
+        ...(choice ? { action: { kind: 'choice' as const, id: choice.id, outcomeId: choice.outcomes?.find(outcome => outcome.id === id || !!edge && outcome.navigationEdgeId === edge.id)?.id } } : command ? { action: { kind: 'command' as const, id: command.id, outcomeId: command.outcomes?.find(outcome => outcome.id === id || !!edge && outcome.navigationEdgeId === edge.id)?.id } } : {}) };
+    }
+    const sections = [
+      ['rules', world?.rules], ['dialogue', world?.conversations], ['actors', world?.eventDefinitions], ['actors', world?.entities], ['actors', world?.entityDefinitions], ['inventory', world?.itemDefinitions], ['inventory', world?.initialInventory], ['scripts', world?.scripts],
+    ] as const;
+    const collection = sections.find(([, items]) => items?.some(entry => entry.id === id));
+    const section = collection?.[0] ?? (/stateDefinitions|worldState|state key/u.test(`${pointer} ${item.message}`) ? 'state' : /conversation|dialogue/u.test(pointer) ? 'dialogue' : /event|entit/u.test(pointer) ? 'actors' : /item|inventory/u.test(pointer) ? 'inventory' : /actionDefaults/u.test(pointer) ? 'defaults' : /locale|translation|key.*missing from default/u.test(`${item.path} ${item.message}`) ? 'text' : 'state');
+    return { section, tab: section === 'text' ? 'text' as const : section === 'scripts' ? 'scripts' as const : 'world' as const };
+  }
+  function diagnosticContext(item: Diagnostic): string {
+    const target = diagnosticTarget(item);
+    if ('nodeId' in target) {
+      const node = world?.nodes.find(node => node.id === target.nodeId);
+      const title = node?.title.kind === 'literal' ? node.title.text : node?.title.kind === 'locale-key' ? locales.find(locale => locale.locale === manifest?.defaultLocale)?.strings[node.title.key] ?? node.title.key : 'Scene';
+      return `${title} / ${target.tab === 'actions' ? 'Player actions' : target.tab === 'logic' ? 'Scene logic' : 'Scene content'}`;
+    }
+    return target.tab === 'text' ? 'Text / Translations' : `World / ${target.section}`;
+  }
+  function openDiagnostic(item: Diagnostic): void {
+    const path = item.path ?? 'world.json';
+    if (mode === 'sage' || path !== 'world.json' && !path.startsWith('locales/') && path !== 'project.json') {
+      workspaceRef.current = createSageWorkspace(snapshot!, path); setMode('sage'); return;
+    }
+    const target = diagnosticTarget(item);
+    setMode('apprentice'); setInspectorCollapsed(false); setInspectorTab(target.tab); setSelectedDiagnostic(item);
+    if ('nodeId' in target) { setSelectedNodeId(target.nodeId); setActionFocus('action' in target && target.action ? { ...target.action, request: Date.now() } : undefined); }
+    else if (target.section !== 'text' && target.section !== 'scripts') setRequestedWorldSection({ section: target.section, entityId: item.entityId, request: Date.now() });
+    window.setTimeout(() => document.querySelector<HTMLElement>('.apprentice-diagnostic-target')?.scrollIntoView({ block: 'nearest' }), 0);
   }
 
   const workspace = workspaceRef.current;
@@ -773,7 +901,9 @@ function App(): React.ReactElement {
         <button aria-pressed={mode === 'sage'} onClick={() => { const current = snapshotRef.current ?? snapshot; if (current) { if (!workspaceRef.current || workspaceRef.current.getState().snapshot !== current) workspaceRef.current = createSageWorkspace(current); setStatus('Sage Mode is using the current project snapshot.'); } setTourPhase(null); setMode('sage'); }}>Sage</button>
         <button aria-pressed={mode === 'apprentice'} onClick={() => { setTourPhase(null); setMode('apprentice'); }}>Apprentice</button>
       </nav>
-      <nav className="studio-actions" aria-label="Studio actions">
+      <nav className="studio-actions" aria-label="Studio actions" data-history-revision={historyRevision}>
+        <button disabled={!projectHistory.current.past.length} onClick={() => restoreProjectEdit('undo')}>Undo project edit</button>
+        <button disabled={!projectHistory.current.future.length} onClick={() => restoreProjectEdit('redo')}>Redo project edit</button>
         <button data-tour="playtest-action" onClick={() => requestAction('play', () => { void startPlaytest(); })}>Playtest</button>
         <button onClick={() => requestAction('play', () => { void startPlay(); })}>Play</button>
         <button data-tour="project-download" onClick={() => requestAction('save-project', () => { void saveZip(); })}>Download project ZIP</button>
@@ -781,7 +911,7 @@ function App(): React.ReactElement {
       </nav>
     </div>
     <section className="workspace-heading" aria-label="Current workspace"><div><p className="eyebrow">{mode === 'sage' ? 'THE FILE DESK' : mode === 'apprentice' ? 'THE STORY MAP' : mode === 'playtest' ? 'THE TEST CHAMBER' : 'THE READER VIEW'}</p><div className="workspace-heading__title"><h1>{mode === 'sage' ? 'Sage' : mode === 'apprentice' ? 'Apprentice' : mode === 'playtest' ? 'Playtest' : 'Play'}</h1><p>{mode === 'sage' ? 'Edit the project at its source.' : mode === 'apprentice' ? 'Shape scenes and their connections.' : mode === 'playtest' ? 'Try a run and inspect what happened.' : 'Experience the story as a reader.'}</p></div></div><div className="workspace-heading__aside"><span className="workspace-heading__project">CURRENT PROJECT · {manifest?.title ?? manifest?.projectId ?? 'Untitled project'}</span><button type="button" onClick={() => { setTourKind(mode); setTourPhase('tour'); }}>Tour this view</button></div></section>
-    {status && <p className="status" role="status">{status}</p>}
+    {status && <div className="studio-toast" role="status"><span>{status}</span><button type="button" aria-label="Dismiss notification" onClick={() => setStatus('')}>×</button></div>}
     {playActivity && mode === 'play' && <p className="status" data-testid="hosted-play-activity">{playActivity}</p>}
     {operationError && <p className="status" role="alert">{operationError}</p>}
     {unsavedSince !== undefined && reminderVisible && <aside className="save-reminder" role="status" aria-live="polite" aria-label="Unsaved work reminder">
@@ -790,7 +920,14 @@ function App(): React.ReactElement {
       <button onClick={() => { setReminderVisible(false); setReminderDismissedFor(unsavedSince); }}>Dismiss reminder</button>
     </aside>}
     <a className="visually-hidden-focusable" href="#project-diagnostics">Skip to diagnostics</a>
-    <div id="studio-workspace" className="studio-workspace" role={mode === 'play' ? 'region' : 'main'} aria-label={mode === 'play' ? 'Game player' : 'Project workspace'} tabIndex={-1}>
+    <StudioErrorBoundary onReturn={() => { setTourPhase(null); setMode(mode === 'apprentice' ? 'sage' : 'apprentice'); }} onDownload={saveZip}>
+    <div id="studio-workspace" className="studio-workspace" role={mode === 'play' ? 'region' : 'main'} aria-label={mode === 'play' ? 'Game player' : 'Project workspace'} tabIndex={-1} onKeyDown={event => {
+      if (mode !== 'apprentice' && mode !== 'sage' || event.defaultPrevented || !(event.metaKey || event.ctrlKey)) return;
+      if ((event.target as Element).closest('input, textarea, select, [contenteditable="true"], .cm-editor, .apprentice-map')) return;
+      if (event.key.toLowerCase() === 'z' || event.ctrlKey && event.key.toLowerCase() === 'y') {
+        event.preventDefault(); restoreProjectEdit(event.shiftKey || event.key.toLowerCase() === 'y' ? 'redo' : 'undo');
+      }
+    }}>
     {mode === 'sage' && workspace && <SageMode workspace={workspace} showExport={false} onStateChange={state => {
       if (state.snapshot !== snapshotRef.current) {
         snapshotRef.current = state.snapshot;
@@ -800,9 +937,10 @@ function App(): React.ReactElement {
       }
     }} />}
     {mode === 'apprentice' && world && <div ref={apprenticeWorkbenchRef} className={`apprentice-workbench${inspectorCollapsed ? ' is-collapsed' : ''}${inspectorExpanded ? ' is-expanded' : ''}`} style={{ '--inspector-width': `${inspectorWidth}px` } as React.CSSProperties}>
-      <div className="apprentice-map"><ApprenticeGraph world={world} positions={graphPositions} onPositionsChange={updateGraphPositions} {...(selectedNodeId ? { selectedNodeId } : {})}
+      <div className="apprentice-map"><ApprenticeGraph world={world} layout={graphLayout ?? emptyGraphLayout()} {...(graphLayout ? { onLayoutChange: updateGraphLayout } : {})} {...(selectedNodeId ? { selectedNodeId } : {})}
+        localeStrings={locales.find(locale => locale.locale === manifest?.defaultLocale)?.strings ?? {}}
         nodeLabels={Object.fromEntries(world.nodes.map(node => [node.id, node.title.kind === 'literal' ? node.title.text : locales.find(locale => locale.locale === manifest?.defaultLocale)?.strings[node.title.key] ?? node.title.key]))}
-        onSelectNode={nodeId => { setSelectedNodeId(nodeId); setInspectorTab('scene'); }} onWorldChange={updateWorld} />
+        onOpenActions={(nodeId, action) => { setSelectedNodeId(nodeId); setActionFocus(action ? { ...action, request: Date.now() } : undefined); setInspectorTab('actions'); setInspectorCollapsed(false); }} onSelectNode={nodeId => { setSelectedNodeId(nodeId); setActionFocus(undefined); setInspectorTab('scene'); setSelectedDiagnostic(undefined); }} onWorldChange={updateWorld} />
       </div>
       {!inspectorCollapsed && <div className="apprentice-divider" role="separator" aria-label="Resize inspector" aria-orientation="vertical" aria-valuemin={320} aria-valuemax={900} aria-valuenow={inspectorWidth} tabIndex={0}
         onPointerDown={event => { resizingInspector.current = true; event.currentTarget.setPointerCapture(event.pointerId); }}
@@ -811,19 +949,23 @@ function App(): React.ReactElement {
         onPointerCancel={() => { resizingInspector.current = false; }}
         onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setInspectorWidth(width => Math.max(320, Math.min(900, width + (event.key === 'ArrowLeft' ? 24 : -24)))); } }} />}
       <aside className="apprentice-inspector" aria-label="Story inspector">
-        <div className="apprentice-inspector__heading"><button type="button" className="apprentice-inspector__collapse" aria-label={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'} title={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'} onClick={() => { setInspectorCollapsed(value => !value); setInspectorExpanded(false); }}>{inspectorCollapsed ? '‹' : '›'}</button>{!inspectorCollapsed && <><div><span className="eyebrow">THE INSPECTOR</span><h2>{inspectorTab === 'scene' ? world.nodes.find(node => node.id === selectedNodeId)?.visitable === false ? 'Folder details' : 'Scene details' : inspectorTab === 'world' ? 'World settings' : 'Scripts'}</h2></div><button type="button" className="apprentice-inspector__expand" aria-label={inspectorExpanded ? 'Exit workspace full screen' : 'Workspace full screen'} title={inspectorExpanded ? 'Exit workspace full screen' : 'Expand map and inspector'} onClick={() => setInspectorExpanded(value => !value)}>{inspectorExpanded ? '↙' : '⤢'}</button></>}</div>
+        <div className="apprentice-inspector__heading"><button type="button" className="apprentice-inspector__collapse" aria-label={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'} title={inspectorCollapsed ? 'Show inspector' : 'Hide inspector'} onClick={() => { setInspectorCollapsed(value => !value); setInspectorExpanded(false); }}>{inspectorCollapsed ? '‹' : '›'}</button>{!inspectorCollapsed && <><div><span className="eyebrow">THE INSPECTOR</span><h2>{inspectorTab === 'scene' ? world.nodes.find(node => node.id === selectedNodeId)?.visitable === false ? 'Logic folder details' : 'Scene details' : inspectorTab === 'actions' ? 'Player actions' : inspectorTab === 'text' ? 'Text / Translations' : inspectorTab === 'logic' ? 'Scene logic' : inspectorTab === 'world' ? 'World settings' : 'Scripts'}</h2></div><button type="button" className="apprentice-inspector__expand" aria-label={inspectorExpanded ? 'Exit workspace full screen' : 'Workspace full screen'} title={inspectorExpanded ? 'Exit workspace full screen' : 'Expand map and inspector'} onClick={() => setInspectorExpanded(value => !value)}>{inspectorExpanded ? '↙' : '⤢'}</button></>}</div>
         {!inspectorCollapsed && <>
         <div className="apprentice-inspector__tabs" role="tablist" aria-label="Inspector sections">
           <button role="tab" aria-selected={inspectorTab === 'scene'} onClick={() => setInspectorTab('scene')}>Scene</button>
+          <button role="tab" aria-selected={inspectorTab === 'actions'} onClick={() => setInspectorTab('actions')}>Actions</button>
+          <button role="tab" aria-selected={inspectorTab === 'text'} onClick={() => setInspectorTab('text')}>Text / Translations</button>
+          <button role="tab" aria-selected={inspectorTab === 'logic'} onClick={() => setInspectorTab('logic')}>Logic</button>
           <button role="tab" aria-selected={inspectorTab === 'world'} onClick={() => setInspectorTab('world')}>World</button>
           <button role="tab" aria-selected={inspectorTab === 'scripts'} onClick={() => setInspectorTab('scripts')}>Scripts</button>
         </div>
-        {starterGuideVisible && inspectorTab === 'scene' && world.entryNodeId === 'old-gate' && <aside className="apprentice-starter-guide" aria-label="Start making your game"><button type="button" className="apprentice-starter-guide__close" aria-label="Dismiss starter guide" onClick={() => { localStorage.setItem('dungeon-scrivener-starter-guide-v1', 'dismissed'); setStarterGuideVisible(false); }}>×</button><span className="eyebrow">START HERE</span><h2>Make this story yours</h2><ol><li>Try the sample gate and watchtower routes.</li><li>Select The Old Gate and rewrite its opening.</li><li>Add a scene, draw a route, then give a choice that route.</li></ol><div><button type="button" onClick={() => requestAction('play', () => { void startPlaytest(); })}>Try sample story</button><button type="button" onClick={() => { setTourKind('tutorial'); setTourPhase('invite'); }}>Game tutorial</button></div></aside>}
-        {inspectorTab !== 'scripts' && <ApprenticeForms world={world} view={inspectorTab} {...(selectedNodeId ? { selectedNodeId } : {})} onWorldChange={updateWorld}
+        {selectedDiagnostic && <aside className="apprentice-diagnostic-target" role="status"><button type="button" aria-label="Dismiss selected problem" onClick={() => setSelectedDiagnostic(undefined)}>×</button><strong>Problem to resolve</strong><p>{diagnosticMessage(selectedDiagnostic, world, locales.find(locale => locale.locale === manifest?.defaultLocale))}</p><p>{selectedDiagnostic.suggestedFix}</p></aside>}
+        {starterGuideVisible && selectedNodeId && inspectorTab === 'scene' && world.entryNodeId === 'old-gate' && <aside className="apprentice-starter-guide" aria-label="Start making your game"><button type="button" className="apprentice-starter-guide__close" aria-label="Dismiss starter guide" onClick={() => { localStorage.setItem('dungeon-scrivener-starter-guide-v1', 'dismissed'); setStarterGuideVisible(false); }}>×</button><span className="eyebrow">START HERE</span><h2>Make this story yours</h2><ol><li>Try the sample gate and watchtower routes.</li><li>Select The Old Gate and rewrite its opening.</li><li>Add a scene, draw a route, then give a choice that route.</li></ol><div><button type="button" onClick={() => requestAction('play', () => { void startPlaytest(); })}>Try sample story</button><button type="button" onClick={() => { setTourKind('tutorial'); setTourPhase('invite'); }}>Game tutorial</button></div></aside>}
+        {inspectorTab !== 'scripts' && <ApprenticeForms world={world} view={inspectorTab} actionFocus={actionFocus} requestedWorldSection={requestedWorldSection} {...(selectedNodeId ? { selectedNodeId } : {})} onWorldChange={updateWorld}
           project={snapshot} locales={locales} defaultLocale={manifest?.defaultLocale}
           assets={diagnosticMedia?.snapshot.projectId === snapshot.projectId ? diagnosticMedia.media.listAssets() : []}
           mediaAssets={diagnosticMedia?.snapshot.projectId === snapshot.projectId ? diagnosticMedia.media : undefined}
-          onLocalesChange={updateLocales} onImportAsset={importMediaAsset} />}
+          onLocalesChange={updateLocales} onProjectContentChange={updateProjectContent} onImportAsset={importMediaAsset} />}
         {inspectorTab === 'scripts' && <ApprenticeScripts world={world} project={snapshot} onEditInSage={path => {
           const current = snapshotRef.current ?? snapshot;
           workspaceRef.current = createSageWorkspace(current, path);
@@ -841,20 +983,22 @@ function App(): React.ReactElement {
       manifest={manifest} world={world} locales={locales} snapshot={playSnapshot} {...(requestedLocale ? { requestedLocale } : {})}
       localeOptions={locales.map(locale => ({ locale: locale.locale, label: locale.locale }))} onLocaleChange={setRequestedLocale}
       onSnapshot={next => { playSnapshotRef.current = next; setPlaySnapshot(next); }}
+      recoveryAction={{ label: 'Return to editor', onClick: () => setMode('apprentice') }}
       mediaAssets={playConfig.media} themeCss={playConfig.themeCss} persistenceNotice={persistenceNotice}
       saveSlots={getSaveSlotChoices(world.savePolicy)} onSave={saveHosted}
       {...(world.savePolicy.enabled ? { onLoad: (file: File) => { void loadHosted(file); } } : {})}
     />}
-    {snapshot !== analysisSnapshot && <aside className="diagnostics" id="project-diagnostics" role="status">Checking project diagnostics…</aside>}
-    {snapshot === analysisSnapshot && report && <aside className="diagnostics" id="project-diagnostics" tabIndex={-1} aria-label="Project diagnostics" aria-live="polite">
-      <div className="diagnostics__heading"><strong>Project diagnostics</strong><span className={report.diagnostics.length ? 'diagnostics__count has-issues' : 'diagnostics__count'}>{report.diagnostics.length ? `${report.diagnostics.length} to review` : 'All clear'}</span></div>
-      {report.diagnostics.length > 10 && <input type="search" aria-label="Filter project diagnostics" value={diagnosticQuery} onChange={event => { setDiagnosticQuery(event.target.value); setDiagnosticPage(0); }} placeholder="Find a code, file, or message" />}
-      {report.diagnostics.length ? <>
-        <ul>{visibleDiagnostics.slice(visibleDiagnosticPage * 50, (visibleDiagnosticPage + 1) * 50).map((item, index) => <li key={`${item.code}:${visibleDiagnosticPage * 50 + index}`}>{item.severity}: {item.code}: {diagnosticMessage(item, world, locales.find(locale => locale.locale === manifest?.defaultLocale))}</li>)}</ul>
+    <aside className={`diagnostics${inspectorExpanded && mode === 'apprentice' ? ' is-workbench-overlay' : ''}`} id="project-diagnostics" tabIndex={-1} aria-label="Project diagnostics" aria-busy={snapshot !== analysisSnapshot}>
+      <div className="diagnostics__heading"><strong>Project diagnostics</strong><span className={report?.diagnostics.length ? 'diagnostics__count has-issues' : 'diagnostics__count'}>{snapshot !== analysisSnapshot ? 'Checking…' : report?.diagnostics.length ? `${report.diagnostics.length} to review` : 'All clear'}</span>
+      <input type="search" aria-label="Filter project diagnostics" value={diagnosticQuery} onChange={event => { setDiagnosticQuery(event.target.value); setDiagnosticPage(0); }} placeholder="Find a scene, code, file, or message" /></div>
+      <div className="diagnostics__body">
+      {report?.diagnostics.length ? <>
+        <ul>{visibleDiagnostics.slice(visibleDiagnosticPage * 50, (visibleDiagnosticPage + 1) * 50).map((item, index) => <li key={`${item.code}:${visibleDiagnosticPage * 50 + index}`}><button type="button" className="diagnostics__issue" onClick={() => openDiagnostic(item)}><span>{diagnosticContext(item)}: {diagnosticMessage(item, world, locales.find(locale => locale.locale === manifest?.defaultLocale))}</span><small>{item.severity} · {item.code} · {item.path ?? 'world.json'}{item.suggestedFix ? ` · ${item.suggestedFix}` : ''}</small></button></li>)}</ul>
         {visibleDiagnostics.length === 0 && <p>No matching diagnostics.</p>}
         {visibleDiagnostics.length > 50 && <nav className="diagnostics__pages" aria-label="Diagnostic pages"><button type="button" disabled={visibleDiagnosticPage === 0} onClick={() => setDiagnosticPage(visibleDiagnosticPage - 1)}>Previous</button><span>{visibleDiagnosticPage * 50 + 1}–{Math.min((visibleDiagnosticPage + 1) * 50, visibleDiagnostics.length)} of {visibleDiagnostics.length}</span><button type="button" disabled={(visibleDiagnosticPage + 1) * 50 >= visibleDiagnostics.length} onClick={() => setDiagnosticPage(visibleDiagnosticPage + 1)}>Next</button></nav>}
-      </> : <p>No diagnostics.</p>}
-    </aside>}
+      </> : <p>{snapshot !== analysisSnapshot ? 'Reviewing the latest changes. Previous results stay available while checking.' : 'No diagnostics.'}</p>}
+      </div>
+    </aside>
     <button className="clear-recovery" onClick={async () => {
       if (!snapshot) return;
       const result = await clearRecovery(snapshot.projectId);
@@ -862,6 +1006,7 @@ function App(): React.ReactElement {
       if (result.ok) setRecoveryAvailable(false);
     }}>Clear recovery copy</button>
     </div>
+    </StudioErrorBoundary>
     <dialog ref={confirmationRef} aria-labelledby="warning-title" aria-describedby="warning-description" onCancel={event => { event.preventDefault(); setConfirmation(undefined); }}>
       {confirmation && <><h2 id="warning-title">Review warnings before {confirmation.action === 'save-project' ? 'downloading the project' : confirmation.action}</h2>
         <p id="warning-description">These warnings require your acknowledgment before continuing.</p>
@@ -901,4 +1046,7 @@ function App(): React.ReactElement {
   </div>;
 }
 
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(<StudioErrorBoundary onDownload={async () => {
+  if (!lastAuthorSnapshot) throw new Error('No in-memory project is available. Reload Studio and choose the local recovery copy, if offered.');
+  download(await writeProjectZip(lastAuthorSnapshot), `${lastAuthorSnapshot.projectId}-recovery.zip`, 'application/zip');
+}}><App /></StudioErrorBoundary>);

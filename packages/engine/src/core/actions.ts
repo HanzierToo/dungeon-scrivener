@@ -1,5 +1,5 @@
 import type {
-  ActionInput, ActionSet, AvailableActionEvaluation, AvailableActionsResult, AvailabilityTraceHistory, ChoiceDefinition, CommandDefinition, CommandMatchResult,
+  ActionInput, ActionOutcome, ActionSet, AvailableActionEvaluation, AvailableActionsResult, AvailabilityTraceHistory, ChoiceDefinition, CommandDefinition, CommandMatchResult,
   Condition, Diagnostic, Effect, EventOccurrence, LifecycleEffects, PlayerInput,
   PlayerInputResolution, PlayerInputTransitionResult, Scalar, ScriptInvocationOrigin, SessionSnapshot,
   TraceSource, TransitionResult, TransitionTraceRecord, ValueType, WorldDocument,
@@ -352,6 +352,7 @@ function navigate(context: ActionContext, edgeId: string, source: TraceSource, r
     currentNodeId: target.id,
     nodeVisitCounts: { ...context.snapshot.nodeVisitCounts, [target.id]: nextVisits },
   };
+  delete (context.snapshot as { sceneText?: unknown }).sceneText;
   addTrace(context, { kind: 'node-transition', source, reason, fromNodeId, toNodeId: target.id });
   const lifecycleOccurrences = phase === 'entry' ? previousVisits : Math.max(0, previousVisits - 1);
   if (!runLifecycle(context, target.id, phase, source, reason, depth, lifecycleOccurrences)) return false;
@@ -400,6 +401,7 @@ function navigateToNode(context: ActionContext, nodeId: string, source: TraceSou
     currentNodeId: target.id,
     nodeVisitCounts: { ...context.snapshot.nodeVisitCounts, [target.id]: previousVisits + 1 },
   };
+  delete (context.snapshot as { sceneText?: unknown }).sceneText;
   if (!addTrace(context, { kind: 'node-transition', source, reason, fromNodeId, toNodeId: target.id })) {
     fail(context, BUDGET_EXCEEDED, `Action exceeded the ${MAX_TRACE_RECORDS} trace budget.`);
     return false;
@@ -607,6 +609,20 @@ function validParameters(command: CommandDefinition, parameters: Readonly<Record
   });
 }
 
+/** Pure selection shared by dispatch and player projection. */
+export function inspectActionOutcomes(world: WorldDocument, snapshot: SessionSnapshot, outcomes: readonly ActionOutcome[] | undefined): {
+  readonly selected?: ActionOutcome; readonly checks: readonly { readonly outcome: ActionOutcome; readonly matched: boolean }[];
+} {
+  if ((outcomes?.length ?? 0) > 64) throw new Error('An action supports at most 64 conditional outcomes.');
+  const checks: { outcome: ActionOutcome; matched: boolean }[] = [];
+  for (const outcome of outcomes ?? []) {
+    const matched = conditionEnabled(world, snapshot, outcome.condition);
+    checks.push({ outcome, matched });
+    if (matched) return { selected: outcome, checks };
+  }
+  return { checks };
+}
+
 export function dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, input: ActionInput, scriptEnvironment?: ScriptExecutionEnvironment): TransitionResult {
   const scriptDiagnostics = scriptEnvironment ? validateScriptEnvironment(world, scriptEnvironment) : [];
   if (scriptDiagnostics.length > 0) return transition(snapshot, [], scriptDiagnostics);
@@ -614,6 +630,7 @@ export function dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, 
   let effects: readonly Effect[];
   let navigationEdgeId: string | undefined;
   let actionId: string;
+  let outcomes: readonly ActionOutcome[] | undefined;
   if (input.kind === 'choice') {
     const choice = actionSet.choices.find((candidate) => candidate.id === input.actionId);
     if (!choice) return transition(snapshot, [], [issue(INVALID_ACTION, `Choice ${input.actionId} is unavailable at node ${snapshot.currentNodeId}.`)]);
@@ -624,6 +641,7 @@ export function dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, 
     effects = choice.effects;
     navigationEdgeId = choice.navigationEdgeId;
     actionId = choice.id;
+    outcomes = choice.outcomes;
   } else {
     const command = actionSet.commands.find((candidate) => candidate.id === input.actionId);
     if (!command || !validParameters(command, input.parameters)) {
@@ -636,6 +654,7 @@ export function dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, 
     effects = command.effects;
     navigationEdgeId = command.navigationEdgeId;
     actionId = command.id;
+    outcomes = command.outcomes;
   }
   const source: TraceSource = { kind: 'action', actionId };
   const context: ActionContext = {
@@ -643,6 +662,19 @@ export function dispatchAction(world: WorldDocument, snapshot: SessionSnapshot, 
     scriptTransaction: createScriptActionTransaction(scriptEnvironment),
   };
   addTrace(context, { kind: 'action', source, reason: `Player selected action ${actionId}.` });
+  if (outcomes?.length) {
+    if (outcomes.length > 64) { fail(context, BUDGET_EXCEEDED, 'An action supports at most 64 conditional outcomes.'); return finishAction(context); }
+    let matched = false;
+    try {
+      const inspection = inspectActionOutcomes(world, snapshot, outcomes);
+      for (const check of inspection.checks) addTrace(context, { kind: 'condition', source, reason: `Outcome ${check.outcome.id} (${check.outcome.name}): ${check.matched ? 'matched and selected' : 'did not match'}.` });
+      if (inspection.selected) { effects = inspection.selected.effects; navigationEdgeId = inspection.selected.navigationEdgeId; matched = true; }
+    } catch (error) {
+      fail(context, INVALID_ACTION, `Action ${actionId} has an invalid outcome condition: ${error instanceof Error ? error.message : String(error)}`);
+      return finishAction(context);
+    }
+    if (!matched) addTrace(context, { kind: 'condition', source, reason: `No conditional outcome matched action ${actionId}; selected Otherwise.` });
+  }
   if (!applyRuleTransition(context, processRulePhase(world, context.snapshot, 'action-start', source, `Action ${actionId} starts.`, context.scriptTransaction))) return finishAction(context);
   if (!runEffects(context, effects, source, `Effects for action ${actionId}.`, 0)) return finishAction(context);
   if (navigationEdgeId && !navigate(context, navigationEdgeId, source, `Action ${actionId} navigates by edge ${navigationEdgeId}.`, 0)) return finishAction(context);

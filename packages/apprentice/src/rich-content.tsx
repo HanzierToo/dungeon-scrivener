@@ -156,7 +156,7 @@ export function RichContentEditor({ value, onChange, world, locales = [], defaul
   };
 
   return <section className="apprentice-rich-content" aria-label="Visual Markdown editor">
-    <h3>Node text</h3>
+    <h3>Scene description</h3>
     <label>Content source <select value={value.kind} onChange={(event) => onChange(event.target.value === 'literal' ? { kind: 'literal', text: source } : { kind: 'locale-key', key: '' })}><option value="literal">Markdown text</option><option value="locale-key">Translation key</option></select></label>
     {value.kind === 'locale-key' && <>
       <label>Translation key <input list="apprentice-locale-keys" value={value.key} onChange={(event) => onChange({ ...value, key: event.target.value })} /></label>
